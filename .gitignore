@@ -16,6 +16,7 @@ Data/personal/*
 !Data/personal/forum2.train.txt
 !Data/personal/forum2.eval.tsv
 !Data/personal/dialogue.lattice.tsv
+!Data/personal/forum2.lattice.tsv
 
 # (The lexicon, bigram model, Core ML model and fp16 weights are tracked with Git LFS, see .gitattributes.)
 Resources/KeyModel.mlmodelc/

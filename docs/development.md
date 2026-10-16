@@ -31,8 +31,8 @@ Scripts/symtest.sh                     # 只跑按键测试
 |---|---|---|
 | `corpus2/`、`corpus3/` | 全部训练与统计语料（来源见 `Training/sources.py`、`Data/lexicons/sources.tsv`） | 下载 |
 | `lexicons/` | 各家公开词库原文与合并表 `all_words.tsv` | `Tools/collect_*.py`、`merge_lexicons.py` |
-| `lexicon/` | 正式词库产物：`lexicon.sqlite`、`bigram.bin`、`word_counts_vit3.tsv`、`english_casing.tsv`、`readings.tsv`、`lm0.tsv` | 下面的词库流程 |
-| `lm9/` | 当前模型：`model.pt`、各来源 token 流、`vocab.json`、`sources.json`、32 行导出、`weights.*` | 下面的模型流程 |
+| `lexicon/` | 正式词库产物：`lexicon.sqlite`、`bigram.bin`、`bigram_counts.npz`（词对计数缓存）、`word_counts_vit3.tsv`、`english_casing.tsv`、`readings.tsv` | 下面的词库流程 |
+| `lm9/` | 当前模型：`model.pt`、各来源 token 流（实体文件，9 GB）、`vocab.json`、`sources.json`、32 行导出（mlpackage 与 mlmodelc）、`weights.*` | 下面的模型流程 |
 | `base/lm3_model.pt` | lm9 的起点（从头训练的 8 万步基座） | 历史产物 |
 | `holdout/` | 各来源留出文本，所有评测集的来源 | `Training/prepare_data.py` |
 | `eval_*.tsv`、`wordlattice/`、`personal/` | 评测集、词测试的格子导出、学习验证材料 | 下面的评测流程 |
@@ -105,7 +105,7 @@ python3 Tools/extract_positions.py Data/prepared/weights Resources/positions.bin
 Scripts/gate.sh
 ```
 
-模型：8 层、512 宽、8 头、窗口 64 的字级 GPT，词表 9026，2990 万参数（`Training/model.py`）。从头训练用 `train.py --steps 80000`（无 `--init`）。换了出厂模型后，本机的微调文件会因结构不符自动丢弃并重新学习；`Data/lexicon/lm0.tsv` 来自 `Tools/add_lm0.py` 时代，建库脚本仍写这一列但引擎不读它。
+模型：8 层、512 宽、8 头、窗口 64 的字级 GPT，词表 9026，2990 万参数（`Training/model.py`）。从头训练用 `train.py --steps 80000`（无 `--init`）。换了出厂模型后，本机的微调文件会因结构不符自动丢弃并重新学习。
 
 当前装机：模型 lm9（lm3 基座 + 6000 步继续训练，验证损失 3.130，32 行导出），词库与二元模型为 2026-10-14 11:21 的构建。
 
