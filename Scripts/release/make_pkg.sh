@@ -26,7 +26,7 @@ POST
 chmod +x "$STAGE/scripts/postinstall" "$STAGE/scripts/register"
 pkgbuild --root "$STAGE/root" --scripts "$STAGE/scripts" \
     --identifier is.chats.typing.pkg --version "$VERSION" --install-location / \
-    "$OUT/智能输入-$VERSION.pkg" >/dev/null
+    "$OUT/Typing-$VERSION.pkg" >/dev/null
 rm -rf "$STAGE"
-(cd "$OUT" && shasum -a 256 "智能输入-$VERSION.pkg" > "智能输入-$VERSION.pkg.sha256")
-ls -la "$OUT/智能输入-$VERSION.pkg"
+(cd "$OUT" && shasum -a 256 "Typing-$VERSION.pkg" > "Typing-$VERSION.pkg.sha256")
+ls -la "$OUT/Typing-$VERSION.pkg"

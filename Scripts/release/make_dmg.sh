@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 VERSION="${1:?usage: make_dmg.sh <version> [out dir]}"
 OUT="${2:-dist}"
 [ -d build/Typing.app ] || Scripts/build.sh
-STAGE="$(mktemp -d)/智能输入"
+STAGE="$(mktemp -d)/Typing"
 mkdir -p "$STAGE" "$OUT"
 cp -R build/Typing.app "$STAGE/"
 ln -s "/Library/Input Methods" "$STAGE/Input Methods"
@@ -21,8 +21,8 @@ cat > "$STAGE/安装说明.txt" <<'NOTE'
 本版本为本机临时签名，首次打开若被系统拦下，到 系统设置 › 隐私与安全性 里选择“仍要打开”。
 卸载：删除 /Library/Input Methods/Typing.app（或 ~/Library/Input Methods/Typing.app）。
 NOTE
-rm -f "$OUT/智能输入-$VERSION.dmg"
-hdiutil create -volname "智能输入 $VERSION" -srcfolder "$STAGE" -ov -format UDZO -quiet "$OUT/智能输入-$VERSION.dmg"
+rm -f "$OUT/Typing-$VERSION.dmg"
+hdiutil create -volname "Typing $VERSION" -srcfolder "$STAGE" -ov -format UDZO -quiet "$OUT/Typing-$VERSION.dmg"
 rm -rf "$(dirname "$STAGE")"
-(cd "$OUT" && shasum -a 256 "智能输入-$VERSION.dmg" > "智能输入-$VERSION.dmg.sha256")
-ls -la "$OUT/智能输入-$VERSION.dmg"
+(cd "$OUT" && shasum -a 256 "Typing-$VERSION.dmg" > "Typing-$VERSION.dmg.sha256")
+ls -la "$OUT/Typing-$VERSION.dmg"
