@@ -1,0 +1,37 @@
+# Build products
+.build/
+.build-*/
+build/
+*.dSYM/
+.DS_Store
+
+# Corpora, checkpoints, training environments and generated lexicon tables (tens of GB; see docs/development.md)
+Data/*
+!Data/eval_word_full.tsv
+!Data/eval_word_mixed.tsv
+!Data/eval_word_initials.tsv
+!Data/eval_word_english.tsv
+!Data/personal/
+Data/personal/*
+!Data/personal/forum2.train.txt
+!Data/personal/forum2.eval.tsv
+!Data/personal/dialogue.lattice.tsv
+
+# Release assets too large for a plain repository (built by the pipeline or taken from a release)
+Resources/lexicon.sqlite
+Resources/bigram.bin
+Resources/LanguageModel.mlmodelc/
+Resources/weights.bin
+Resources/KeyModel.mlmodelc/
+
+# Generated icons
+Resources/AppIcon.icns
+Resources/AppIcon.iconset/
+Resources/icon.pdf
+Resources/menu.pdf
+Resources/palette.png
+Resources/palette@2x.png
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,5 @@
+/* Names shown in the input menu and in Keyboard settings. */
+CFBundleName = "智能拼音";
+CFBundleDisplayName = "智能拼音";
+"com.john.inputmethod.Typing" = "智能拼音";
+"com.john.inputmethod.Typing.Pinyin" = "智能拼音";
