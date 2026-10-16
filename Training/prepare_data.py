@@ -56,7 +56,7 @@ def codepoints(text):
 
 def simplified_characters():
     known = np.zeros(0x110000, dtype=bool)
-    with open(os.path.join(ROOT, "Resources", "readings.tsv"), encoding="utf-8") as f:
+    with open(os.path.join(ROOT, "Data", "lexicon", "readings.tsv"), encoding="utf-8") as f:
         for line in f:
             known[ord(line.split("\t")[1])] = True
     return known

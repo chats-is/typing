@@ -109,6 +109,8 @@ Scripts/gate.sh
 
 当前装机：模型 lm9（lm3 基座 + 6000 步继续训练，验证损失 3.130，32 行导出），词库与二元模型为 2026-10-14 11:21 的构建。
 
+2026-10-16 在本机把流程各段重新走了一遍核对：建库脚本再生的词库与装机版逐行一致；二元模型重算得到同样的 15,746,631 个词对；`build_model.sh` 从 `lm9/model.pt` 再导出的 Core ML 权重与装机版逐字节一致，`export_weights.py`、`extract_positions.py` 的输出亦同；`make_word_eval.py`、`make_english_eval.py`、`make_genre_eval.py` 再生的评测集与入库文件相同；`train.py --init Data/base/lm3_model.pt --lr 5e-5` 跑 100 步用时 2.1 分钟（验证损失 3.134），按此推算 6000 步约 2 小时。
+
 ## 代码约定
 
 - 引擎与 App 的接口只有 `CandidateDecoding`、`SentenceScorer` 和 `Learner`；App 不直接碰 SQLite 或 Metal。

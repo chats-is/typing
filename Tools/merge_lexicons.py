@@ -30,7 +30,7 @@ HAN = re.compile(r"^[一-鿿]+$")
 def main():
     weights = defaultdict(float)
     sources = defaultdict(set)
-    syllables = {line.split("\t")[0] for line in open(os.path.join(ROOT, "Resources", "readings.tsv"), encoding="utf-8")}
+    syllables = {line.split("\t")[0] for line in open(os.path.join(ROOT, "Data", "lexicon", "readings.tsv"), encoding="utf-8")}
 
     def add(source, word, pinyin, weight):
         if not HAN.match(word) or len(word) > 12:

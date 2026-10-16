@@ -37,7 +37,7 @@ def main():
     parser.add_argument("--data", default=os.path.join(ROOT, "Data", "holdout"))
     parser.add_argument("--cased", action="store_true")
     args = parser.parse_args()
-    with open(os.path.join(ROOT, "Resources", "readings.tsv"), encoding="utf-8") as f:
+    with open(os.path.join(ROOT, "Data", "lexicon", "readings.tsv"), encoding="utf-8") as f:
         syllables = {line.split("\t")[0] for line in f}
     with open(os.path.join(ROOT, "Data", "lexicons", "english", "en_50k.txt"), encoding="utf-8") as f:
         english = {line.split(" ")[0].lower() for line in f}
