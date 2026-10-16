@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 swift build -c release >/dev/null 2>&1 || swift build -c release
-E=.build/out/Products/Release/enginecli
+E="$(swift build -c release --show-bin-path)/enginecli"
 R=Resources
 C=(--model "$R/LanguageModel.mlmodelc" --vocab "$R/vocab.json" --lexicon "$R/lexicon.sqlite" --bigram "$R/bigram.bin")
 

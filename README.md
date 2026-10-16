@@ -41,12 +41,17 @@ Scripts/gate.sh         # 装机前的全部门槛：四项词测试、按键测
 
 规矩是“改一处、测全部、不降才装机”。数字见 `docs/benchmarks.md`。
 
+## 发布
+
+推一个 `v*` 标签，GitHub Actions 会跑完整门槛并发布 `智能拼音-<版本>.zip`（App + 安装脚本）和资源归档；用户解压后双击 `安装.command`。细节与签名说明见 `docs/release.md`。
+
 ## 文档
 
 - `docs/architecture.md` 引擎与学习的数据流、线程与锁、模型文件格式
 - `docs/development.md` 日常开发、评测工具、词库与模型的重建流程
 - `docs/decisions.md` 已经定下、不再反复的产品与技术决定
 - `docs/benchmarks.md` 基准数字与测量方法
+- `docs/release.md` 自动发布、签名、用户安装
 
 ## 许可
 

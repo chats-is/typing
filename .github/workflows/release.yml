@@ -1,0 +1,73 @@
+name: Release
+
+# A tag v<major>.<minor>[.<patch>] builds the input method, packs it with the installer and the
+# resources archive, and publishes a GitHub release. The app is signed ad hoc (no Developer ID),
+# so the installer removes the quarantine attribute; see docs/release.md.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: LFS file list
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-ids
+      - uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-ids') }}
+      - name: Fetch LFS files
+        run: git lfs pull
+
+      - name: Version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUILD="$(git rev-list --count HEAD)"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Bundle/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" Bundle/Info.plist
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build and gate
+        run: set -o pipefail; Scripts/gate.sh | tee gate.log
+
+      - name: Package
+        run: |
+          Scripts/build.sh
+          mkdir -p dist/智能拼音
+          cp -R build/Typing.app dist/智能拼音/
+          swiftc -O Tools/register.swift -o dist/智能拼音/register
+          cp Scripts/release/install.sh dist/智能拼音/安装.command
+          cp Scripts/release/uninstall.sh dist/智能拼音/卸载.command
+          cp README.md LICENSE dist/智能拼音/
+          (cd dist && ditto -c -k --keepParent 智能拼音 "智能拼音-$VERSION.zip")
+          (cd dist && shasum -a 256 "智能拼音-$VERSION.zip" > "智能拼音-$VERSION.zip.sha256")
+          Scripts/package_resources.sh dist
+
+      - name: Release notes
+        run: |
+          {
+            echo "## 智能拼音 $VERSION"
+            echo
+            echo "下载 \`智能拼音-$VERSION.zip\`，解压后双击 \`安装.command\`（会复制到 ~/Library/Input Methods 并启用；首次可能需要注销再登录）。"
+            echo "应用为本机临时签名，安装脚本会去掉隔离属性。"
+            echo
+            echo "### 门槛"
+            echo '```'
+            sed -n '/== word tests/,$p' gate.log 2>/dev/null || true
+            echo '```'
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: |
+            dist/智能拼音-*.zip
+            dist/智能拼音-*.zip.sha256
+            dist/typing-resources-*.tar.zst
+            dist/typing-resources-*.sha256

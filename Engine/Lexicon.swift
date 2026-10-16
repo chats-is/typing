@@ -28,10 +28,8 @@ public final class Lexicon {
     private var prefixStmt: OpaquePointer?
     private var partialStmt: OpaquePointer?
     private var abbreviationStmt: OpaquePointer?
-    private var startingStmt: OpaquePointer?
     private var leadingStmt: OpaquePointer?
     private var englishStmt: OpaquePointer?
-    private var widStmt: OpaquePointer?
 
     private var exactCache: [String: [Entry]] = [:]
     private var prefixCache: [String: Bool] = [:]
@@ -91,10 +89,8 @@ public final class Lexicon {
                 throw LexiconError.badFile("cannot prepare: \(message)")
             }
         }
-        sqlite3_prepare_v2(db, "\(columns) INDEXED BY idx_word WHERE word >= ?1 AND word < ?2 AND n BETWEEN 2 AND 4 ORDER BY logp DESC LIMIT ?3", -1, &startingStmt, nil)
         sqlite3_prepare_v2(db, "\(columns) INDEXED BY idx_n_key WHERE n = ?1 AND key >= ?2 AND key < ?3 AND key GLOB ?4 ORDER BY logp DESC LIMIT \(Lexicon.abbreviationLimit)", -1, &leadingStmt, nil)
         sqlite3_prepare_v2(db, "SELECT word, 0, key, logp FROM english WHERE key = ?1 ORDER BY logp DESC LIMIT 8", -1, &englishStmt, nil)
-        sqlite3_prepare_v2(db, "SELECT wid FROM lexicon WHERE word = ?1 LIMIT 1", -1, &widStmt, nil)
     }
 
     deinit {
@@ -102,10 +98,8 @@ public final class Lexicon {
         sqlite3_finalize(prefixStmt)
         sqlite3_finalize(partialStmt)
         sqlite3_finalize(abbreviationStmt)
-        sqlite3_finalize(startingStmt)
         sqlite3_finalize(leadingStmt)
         sqlite3_finalize(englishStmt)
-        sqlite3_finalize(widStmt)
         sqlite3_close(db)
     }
 
@@ -171,16 +165,6 @@ public final class Lexicon {
         return result
     }
 
-    /// Words of 2-4 characters that begin with `character`, most frequent first (evaluation tool).
-    /// Returns nothing on lexicons built before the word index existed.
-    public func words(startingWith character: Character, limit: Int) -> [Entry] {
-        queryLock.lock(); defer { queryLock.unlock() }
-        guard startingStmt != nil else { return [] }
-        sqlite3_bind_text(startingStmt, 1, String(character), -1, Self.transient)
-        sqlite3_bind_text(startingStmt, 2, String(character) + "\u{FFFF}", -1, Self.transient)
-        sqlite3_bind_int(startingStmt, 3, Int32(limit))
-        return collect(startingStmt)
-    }
 
     /// English words typed as `letters` (lowercase), written as they usually are, best first.
     public func english(_ letters: String) -> [Entry] {
@@ -193,15 +177,6 @@ public final class Lexicon {
         return result
     }
 
-    /// The id of a word the lexicon knows, or nil.
-    public func wid(of word: String) -> UInt32? {
-        queryLock.lock(); defer { queryLock.unlock() }
-        guard widStmt != nil else { return nil }
-        sqlite3_bind_text(widStmt, 1, word, -1, Self.transient)
-        defer { sqlite3_reset(widStmt) }
-        guard sqlite3_step(widStmt) == SQLITE_ROW else { return nil }
-        return UInt32(sqlite3_column_int64(widStmt, 0))
-    }
 
     private func collect(_ stmt: OpaquePointer?) -> [Entry] {
         var result: [Entry] = []
