@@ -40,14 +40,7 @@ jobs:
       - name: Package
         run: |
           Scripts/build.sh
-          mkdir -p dist/智能拼音
-          cp -R build/Typing.app dist/智能拼音/
-          swiftc -O Tools/register.swift -o dist/智能拼音/register
-          cp Scripts/release/install.sh dist/智能拼音/安装.command
-          cp Scripts/release/uninstall.sh dist/智能拼音/卸载.command
-          cp README.md LICENSE dist/智能拼音/
-          (cd dist && ditto -c -k --keepParent 智能拼音 "智能拼音-$VERSION.zip")
-          (cd dist && shasum -a 256 "智能拼音-$VERSION.zip" > "智能拼音-$VERSION.zip.sha256")
+          mkdir -p dist
           Scripts/release/make_pkg.sh "$VERSION" dist
           Scripts/release/make_dmg.sh "$VERSION" dist
           Scripts/package_resources.sh dist
@@ -59,8 +52,7 @@ jobs:
             echo
             echo "安装包 \`智能拼音-$VERSION.pkg\`：双击安装到 /Library/Input Methods 并启用（首次可能需要注销再登录）。"
             echo "磁盘映像 \`智能拼音-$VERSION.dmg\`：打开后把 Typing.app 拖进 Input Methods，再到 系统设置 › 键盘 › 输入法 添加。"
-            echo "或者下载 \`智能拼音-$VERSION.zip\`，解压后双击 \`安装.command\`，装到 ~/Library/Input Methods。"
-            echo "两者都是本机临时签名：pkg 需要在 系统设置 › 隐私与安全性 里允许打开；安装脚本会去掉隔离属性。"
+            echo "两者都是本机临时签名，首次打开需要在 系统设置 › 隐私与安全性 里允许。"
             echo
             echo "### 门槛"
             echo '```'
@@ -75,7 +67,5 @@ jobs:
             dist/智能拼音-*.pkg.sha256
             dist/智能拼音-*.dmg
             dist/智能拼音-*.dmg.sha256
-            dist/智能拼音-*.zip
-            dist/智能拼音-*.zip.sha256
             dist/typing-resources-*.tar.zst
             dist/typing-resources-*.sha256

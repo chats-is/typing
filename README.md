@@ -43,7 +43,7 @@ Scripts/gate.sh         # 装机前的全部门槛：四项词测试、按键测
 
 ## 发布
 
-推一个 `v*` 标签，GitHub Actions 会跑完整门槛并发布 `智能拼音-<版本>.pkg`（标准安装包）、`.dmg`（拖放安装）、`.zip`（App + 安装脚本）和资源归档。细节与签名说明见 `docs/release.md`。
+推一个 `v*` 标签，GitHub Actions 会跑完整门槛并发布 `智能拼音-<版本>.pkg`（标准安装包）、`.dmg`（拖放安装）和资源归档。细节与签名说明见 `docs/release.md`。
 
 ## 文档
 

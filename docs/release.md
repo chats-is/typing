@@ -6,7 +6,6 @@
 - `.github/workflows/release.yml`：推一个 `v*` 标签（如 `v0.2`）时，把标签写进 `Info.plist` 的版本号（构建号取提交数），跑完整门槛 `Scripts/gate.sh`，然后发布：
   - `智能拼音-<版本>.pkg`：标准 macOS 安装包（`Scripts/release/make_pkg.sh`，pkgbuild），装到 `/Library/Input Methods`，安装后脚本为当前登录用户注册并启用；
   - `智能拼音-<版本>.dmg`：磁盘映像（`Scripts/release/make_dmg.sh`，hdiutil），内含 `Typing.app`、指向 `/Library/Input Methods` 的链接和说明，拖放安装后到系统设置里添加；
-  - `智能拼音-<版本>.zip`：`Typing.app`、`register`（注册工具）、`安装.command`、`卸载.command`、README、LICENSE，装到用户目录，附 sha256；
   - `typing-resources-<日期>.tar.zst`：词库、二元模型、模型、权重、词表的归档，给没有 Git LFS 的开发环境。
 
 ```sh
@@ -17,13 +16,13 @@ git tag v0.2 && git push origin main v0.2
 
 ## 签名
 
-当前是本机临时签名（ad hoc），没有 Developer ID。用户下载后 Gatekeeper 会拦截：pkg 要在 系统设置 › 隐私与安全性 里点“仍要打开”，zip 的 `安装.command` 通过去掉隔离属性解决。要走正式分发需要两张证书：`Developer ID Application` 签 App（替换 `Scripts/build.sh` 的签名步骤），`Developer ID Installer` 签 pkg（`productsign`），再 `xcrun notarytool submit` 公证并 `stapler staple`。
+当前是本机临时签名（ad hoc），没有 Developer ID。用户下载后 Gatekeeper 会拦截，要在 系统设置 › 隐私与安全性 里点“仍要打开”。要走正式分发需要两张证书：`Developer ID Application` 签 App（替换 `Scripts/build.sh` 的签名步骤），`Developer ID Installer` 签 pkg（`productsign`），再 `xcrun notarytool submit` 公证并 `stapler staple`。
 
 ## 用户安装步骤
 
-1. 双击 `.pkg` 安装；或打开 `.dmg` 把 App 拖进 Input Methods；或解压 zip 后双击 `安装.command`。
+1. 双击 `.pkg` 安装；或打开 `.dmg` 把 App 拖进 Input Methods。
 2. 若输入法菜单里没有“智能拼音”，到 系统设置 › 键盘 › 输入法 添加，或注销后重新登录。
-3. 卸载：pkg 装的删除 `/Library/Input Methods/Typing.app`；zip 装的双击 `卸载.command`。
+3. 卸载：删除 `/Library/Input Methods/Typing.app`，并在 系统设置 › 键盘 › 输入法 里移除“智能拼音”；本机学习数据在 `~/Library/Containers/com.john.inputmethod.Typing`，不需要时一并删除。
 
 ## 发布前检查
 
