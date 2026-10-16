@@ -10,10 +10,14 @@ enum SettingsWindow {
         if window == nil {
             let controller = NSHostingController(rootView: SettingsView())
             let window = NSWindow(contentViewController: controller)
-            window.title = "智能输入 设置"
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 760, height: 600))
+            // The System Settings look: sidebar under a full-height title bar, unified toolbar.
+            window.title = "智能输入"
+            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            window.toolbarStyle = .unified
+            window.titlebarSeparatorStyle = .automatic
+            window.setContentSize(NSSize(width: 780, height: 600))
             window.isReleasedWhenClosed = false
+            window.setFrameAutosaveName("SettingsWindow")
             window.center()
             Self.window = window
         }
@@ -53,41 +57,43 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var symbol: String { self == .general ? "keyboard" : "brain.head.profile" }
 }
 
-/// Which page is shown (a class: with this SDK, assigning a @State value from a button's closure
-/// does not compile in a package build).
-final class SettingsSelection: ObservableObject { @Published var page = SettingsPage.general }
+/// Which page is shown (a class: with this SDK, assigning a @State value from a view's closure
+/// does not compile in a package build). Optional because that is what a List selection binds to.
+final class SettingsSelection: ObservableObject { @Published var page: SettingsPage? = .general }
 
+/// The standard macOS settings layout: a sidebar list on the left, the selected page on the right,
+/// the page's name in the title bar.
 struct SettingsView: View {
     @StateObject private var selection = SettingsSelection()
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(SettingsPage.allCases) { item in
-                    Button { selection.page = item } label: {
-                        Label(item.title, systemImage: item.symbol)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(selection.page == item ? Color.accentColor.opacity(0.18) : Color.clear))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
+        NavigationSplitView {
+            List(SettingsPage.allCases, selection: $selection.page) { item in
+                Label(item.title, systemImage: item.symbol)
             }
-            .padding(10)
-            .frame(width: 170)
-            .background(Color(nsColor: .windowBackgroundColor))
-            Divider()
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+        } detail: {
             Group {
-                switch selection.page {
+                switch selection.page ?? .general {
                 case .general: GeneralSettingsView()
                 case .learning: LearningSettingsView()
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle((selection.page ?? .general).title)
+            .background(WindowTitle(title: (selection.page ?? .general).title))
         }
-        .frame(minWidth: 720, minHeight: 560)
+        .frame(minWidth: 720, minHeight: 540)
+    }
+}
+
+/// Puts the page's name in the title bar (navigationTitle alone does not reach an NSWindow that
+/// hosts the view through NSHostingController).
+private struct WindowTitle: NSViewRepresentable {
+    let title: String
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async { view.window?.title = title }
     }
 }
 
