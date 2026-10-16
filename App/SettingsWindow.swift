@@ -10,7 +10,7 @@ enum SettingsWindow {
         if window == nil {
             let controller = NSHostingController(rootView: SettingsView())
             let window = NSWindow(contentViewController: controller)
-            window.title = "智能输入法 设置"
+            window.title = "智音输入法 设置"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.setContentSize(NSSize(width: 760, height: 600))
             window.isReleasedWhenClosed = false

@@ -5,12 +5,12 @@ cd "$(dirname "$0")/.."
 
 Scripts/build.sh
 
-DEST="$HOME/Library/Input Methods/Typing.app"
+DEST="$HOME/Library/Input Methods/Zhiyin.app"
 mkdir -p "$HOME/Library/Input Methods"
 # Stop the running copy so the system relaunches the new build.
-pkill -x Typing 2>/dev/null || true
+pkill -x Zhiyin 2>/dev/null || true
 rm -rf "$DEST"
-cp -R build/Typing.app "$DEST"
+cp -R build/Zhiyin.app "$DEST"
 
 swiftc -O Tools/register.swift -o build/tools/register
 build/tools/register "$DEST"

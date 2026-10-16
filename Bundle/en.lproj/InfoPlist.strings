@@ -1,5 +1,5 @@
 /* Names shown in the input menu and in Keyboard settings. */
-CFBundleName = "Smart Input Method";
-CFBundleDisplayName = "Smart Input Method";
-"com.john.inputmethod.Typing" = "Smart Input Method";
-"com.john.inputmethod.Typing.Pinyin" = "Smart Pinyin";
+CFBundleName = "Zhiyin Input Method";
+CFBundleDisplayName = "Zhiyin Input Method";
+"is.chats.zhiyin" = "Zhiyin Input Method";
+"is.chats.zhiyin.Pinyin" = "Zhiyin Pinyin";

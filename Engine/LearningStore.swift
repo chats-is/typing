@@ -43,10 +43,10 @@ public final class LearningStore {
     private var exclusionsCache: Set<String>?
     public private(set) var count = 0
 
-    /// Default location: Application Support/Typing/learning (inside the sandbox container when sandboxed).
+    /// Default location: Application Support/Zhiyin/learning (inside the sandbox container when sandboxed).
     public static func defaultDirectory() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        return base.appendingPathComponent("Typing/learning", isDirectory: true)
+        return base.appendingPathComponent("Zhiyin/learning", isDirectory: true)
     }
 
     public init(directory: URL = LearningStore.defaultDirectory()) {

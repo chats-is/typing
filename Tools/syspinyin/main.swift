@@ -197,7 +197,7 @@ final class Runner: NSObject, NSApplicationDelegate {
         }
         textView.inputContext?.activate()
         // Give the input method's server process time to start and connect.
-        let serverBundle = pinyinSourceID.hasPrefix("com.apple.inputmethod.SCIM") ? "com.apple.inputmethod.SCIM" : "com.john.inputmethod.Typing"
+        let serverBundle = pinyinSourceID.hasPrefix("com.apple.inputmethod.SCIM") ? "com.apple.inputmethod.SCIM" : "is.chats.zhiyin"
         for _ in 0..<100 where NSRunningApplication.runningApplications(withBundleIdentifier: serverBundle).isEmpty { spin(0.1) }
         spin(1.5)
         print("input method server running: \(!NSRunningApplication.runningApplications(withBundleIdentifier: serverBundle).isEmpty)")

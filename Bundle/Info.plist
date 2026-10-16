@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>CFBundleExecutable</key>
-	<string>Typing</string>
+	<string>Zhiyin</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.john.inputmethod.Typing</string>
+	<string>is.chats.zhiyin</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>智能输入法</string>
+	<string>智音输入法</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -24,7 +24,7 @@
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>com.john.inputmethod.Typing.Pinyin</key>
+			<key>is.chats.zhiyin.Pinyin</key>
 			<dict>
 				<key>TISIconIsTemplate</key>
 				<true/>
@@ -34,7 +34,7 @@
 					<string>智</string>
 				</dict>
 				<key>TISInputSourceID</key>
-				<string>com.john.inputmethod.Typing.Pinyin</string>
+				<string>is.chats.zhiyin.Pinyin</string>
 				<key>TISIntendedLanguage</key>
 				<string>zh-Hans</string>
 				<key>tsInputModeAlternateMenuIconFileKey</key>
@@ -59,15 +59,15 @@
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>com.john.inputmethod.Typing.Pinyin</string>
+			<string>is.chats.zhiyin.Pinyin</string>
 		</array>
 	</dict>
 	<key>InputMethodConnectionName</key>
-	<string>com.john.inputmethod.Typing_Connection</string>
+	<string>is.chats.zhiyin_Connection</string>
 	<key>InputMethodServerControllerClass</key>
-	<string>TypingInputController</string>
+	<string>ZhiyinInputController</string>
 	<key>InputMethodServerDelegateClass</key>
-	<string>TypingInputController</string>
+	<string>ZhiyinInputController</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>
@@ -82,7 +82,7 @@
 		<string>智</string>
 	</dict>
 	<key>TISInputSourceID</key>
-	<string>com.john.inputmethod.Typing</string>
+	<string>is.chats.zhiyin</string>
 	<key>TISIntendedLanguage</key>
 	<string>zh-Hans</string>
 	<key>tsInputMethodCharacterRepertoireKey</key>
