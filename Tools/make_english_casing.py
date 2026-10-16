@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "Training"))
 from count_words import SAMPLE, WEIGHTS  # noqa: E402
 
-DATA = os.path.join(ROOT, "Data", "lm3")  # cased token streams
+DATA = os.path.join(ROOT, "Data", "lm9")  # cased token streams
 OUT = os.path.join(ROOT, "Data", "lexicon", "english_casing.tsv")
 MIXED_CASE_SHARE = 0.25
 

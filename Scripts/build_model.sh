@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 CHECKPOINT="${1:?usage: Scripts/build_model.sh <checkpoint.pt> [output directory]}"
 OUT="${2:-Resources}"
-PACKAGE="$(dirname "$CHECKPOINT")/$(basename "$CHECKPOINT" .pt).mlpackage"
+PACKAGE="$(dirname "$CHECKPOINT")/LanguageModel${LM_ROWS:-64}.mlpackage"  # e.g. LanguageModel32.mlpackage beside the checkpoint
 mkdir -p "$OUT"
 
 Data/venv-train/bin/python Training/export_coreml.py "$CHECKPOINT" "$PACKAGE"

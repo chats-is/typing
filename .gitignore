@@ -11,6 +11,7 @@ Data/*
 !Data/eval_word_mixed.tsv
 !Data/eval_word_initials.tsv
 !Data/eval_word_english.tsv
+!Data/eval.tsv
 !Data/personal/
 Data/personal/*
 !Data/personal/forum2.train.txt

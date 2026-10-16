@@ -4,7 +4,7 @@
     Data/venv-train/bin/python Tools/build_lexicon.py
 
 Words come from the merged open lexicons (Data/lexicons/all_words.tsv); how usual each one is comes
-from everyday text (Data/lexicon/word_counts.tsv, from Training/count_words.py: chat, real input,
+from everyday text (Data/lexicon/word_counts_vit3.tsv, from Tools/count_words_viterbi.py: chat, real input,
 forums first, news last), with a floor for words that several lexicons agree on, so that a real
 but rarely written word (退格) still beats a nickname (推哥). Single characters carry one row per
 reading, weighted by the readings table. English words carry their usual casing (iphone -> iPhone).
