@@ -2,6 +2,8 @@
 
 三条主线：输入、学习、设置。其余都是开发工具。
 
+输入法本体叫“智能输入法”（bundle `com.john.inputmethod.Typing`），拼音是它的一个输入模式 `com.john.inputmethod.Typing.Pinyin`（菜单里显示“智能拼音”）。将来的语音输入作为第二个模式加进 `Info.plist` 的 `tsInputModeListKey`（如 `….Voice`，“智能语音”），和拼音共用设置窗口与学习目录，各自有自己的控制器逻辑。
+
 ## 输入
 
 每一键的路径（`App/TypingInputController.swift` → `Engine/InputSession.swift` → `Engine/LexiconDecoder.swift`）：

@@ -26,7 +26,7 @@ POST
 chmod +x "$STAGE/scripts/postinstall" "$STAGE/scripts/register"
 pkgbuild --root "$STAGE/root" --scripts "$STAGE/scripts" \
     --identifier com.john.inputmethod.Typing.pkg --version "$VERSION" --install-location / \
-    "$OUT/智能拼音-$VERSION.pkg" >/dev/null
+    "$OUT/智能输入法-$VERSION.pkg" >/dev/null
 rm -rf "$STAGE"
-(cd "$OUT" && shasum -a 256 "智能拼音-$VERSION.pkg" > "智能拼音-$VERSION.pkg.sha256")
-ls -la "$OUT/智能拼音-$VERSION.pkg"
+(cd "$OUT" && shasum -a 256 "智能输入法-$VERSION.pkg" > "智能输入法-$VERSION.pkg.sha256")
+ls -la "$OUT/智能输入法-$VERSION.pkg"
