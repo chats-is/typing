@@ -28,23 +28,40 @@ final class CandidatePanel: NSPanel {
         hidesOnDeactivate = false
 
         container.wantsLayer = true
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.contentView = container
-            backing = glass
-        } else {
-            let effect = NSVisualEffectView()
-            effect.material = .popover
-            effect.state = .active
-            effect.wantsLayer = true
-            effect.layer?.masksToBounds = true
-            effect.addSubview(container)
-            backing = effect
-        }
+        backing = Self.makeBacking(for: container)
         contentView = backing
     }
 
     override var canBecomeKey: Bool { false }
+
+    /// The capsule behind the candidates: Liquid Glass on macOS 26 (needs the macOS 26 SDK, i.e.
+    /// Swift 6.2 or newer to compile), the popover material otherwise.
+    private static func makeBacking(for container: NSView) -> NSView {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.contentView = container
+            return glass
+        }
+        #endif
+        let effect = NSVisualEffectView()
+        effect.material = .popover
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.masksToBounds = true
+        effect.addSubview(container)
+        return effect
+    }
+
+    private static func round(_ backing: NSView, radius: CGFloat) {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *), let glass = backing as? NSGlassEffectView {
+            glass.cornerRadius = radius
+            return
+        }
+        #endif
+        backing.layer?.cornerRadius = radius
+    }
 
     /// Shows `candidates` just below `cursor` (a screen rect), flipping above it at the screen bottom.
     func show(candidates: [String], highlighted: Int, hasMore: Bool, near cursor: NSRect) {
@@ -87,11 +104,7 @@ final class CandidatePanel: NSPanel {
         let size = NSSize(width: x - Self.itemGap + Self.edge.width, height: Self.itemHeight + Self.edge.height * 2)
         container.frame = NSRect(origin: .zero, size: size)
         backing.frame = container.frame
-        if #available(macOS 26.0, *), let glass = backing as? NSGlassEffectView {
-            glass.cornerRadius = size.height / 2
-        } else {
-            backing.layer?.cornerRadius = size.height / 2
-        }
+        Self.round(backing, radius: size.height / 2)
 
         var origin = NSPoint(x: cursor.minX, y: cursor.minY - size.height - 4)
         let screen = NSScreen.screens.first { $0.frame.contains(cursor.origin) } ?? NSScreen.main
