@@ -48,6 +48,7 @@ jobs:
           cp README.md LICENSE dist/智能拼音/
           (cd dist && ditto -c -k --keepParent 智能拼音 "智能拼音-$VERSION.zip")
           (cd dist && shasum -a 256 "智能拼音-$VERSION.zip" > "智能拼音-$VERSION.zip.sha256")
+          Scripts/release/make_pkg.sh "$VERSION" dist
           Scripts/package_resources.sh dist
 
       - name: Release notes
@@ -55,8 +56,9 @@ jobs:
           {
             echo "## 智能拼音 $VERSION"
             echo
-            echo "下载 \`智能拼音-$VERSION.zip\`，解压后双击 \`安装.command\`（会复制到 ~/Library/Input Methods 并启用；首次可能需要注销再登录）。"
-            echo "应用为本机临时签名，安装脚本会去掉隔离属性。"
+            echo "安装包 \`智能拼音-$VERSION.pkg\`：双击安装到 /Library/Input Methods 并启用（首次可能需要注销再登录）。"
+            echo "或者下载 \`智能拼音-$VERSION.zip\`，解压后双击 \`安装.command\`，装到 ~/Library/Input Methods。"
+            echo "两者都是本机临时签名：pkg 需要在 系统设置 › 隐私与安全性 里允许打开；安装脚本会去掉隔离属性。"
             echo
             echo "### 门槛"
             echo '```'
@@ -67,6 +69,8 @@ jobs:
         with:
           body_path: notes.md
           files: |
+            dist/智能拼音-*.pkg
+            dist/智能拼音-*.pkg.sha256
             dist/智能拼音-*.zip
             dist/智能拼音-*.zip.sha256
             dist/typing-resources-*.tar.zst
