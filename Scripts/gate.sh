@@ -1,0 +1,23 @@
+#!/bin/bash
+# The gate before anything is installed: word tests, key handling, concurrency, pacing.
+# Usage: Scripts/gate.sh [extra eval file ...]   (e.g. a private replay file)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+swift build -c release >/dev/null 2>&1 || swift build -c release
+E=.build/out/Products/Release/enginecli
+R=Resources
+C=(--model "$R/LanguageModel.mlmodelc" --vocab "$R/vocab.json" --lexicon "$R/lexicon.sqlite" --bigram "$R/bigram.bin")
+
+echo "== word tests (first choice)"
+for f in Data/eval_word_full.tsv Data/eval_word_mixed.tsv Data/eval_word_initials.tsv Data/eval_word_english.tsv "$@"; do
+    printf '%-32s ' "$(basename "$f")"
+    "$E" "${C[@]}" --eval "$f" 2>/dev/null | grep "sentences:" | sed -E 's/ +among best.*//'
+done
+echo "== per key"
+"$E" "${C[@]}" --eval Data/eval_word_mixed.tsv --typing --limit 300 2>/dev/null | grep "per key"
+echo "== pace 120 ms"
+"$E" "${C[@]}" --eval Data/eval_word_mixed.tsv --pace 120 --limit 60 2>/dev/null | grep -E "pace|reorder"
+echo "== stress"
+"$E" "${C[@]}" --stress 15 2>/dev/null | tail -1
+echo "== keys"
+Scripts/symtest.sh 2>/dev/null | tail -1

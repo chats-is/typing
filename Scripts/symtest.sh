@@ -1,6 +1,7 @@
 #!/bin/bash
 # Drives the input controller with a fake text client (no Accessibility permission needed):
-# symbol keys, their candidates, arrows, delete, quotes. Needs a release build (swift build -c release).
+# keys, candidates, paging, symbols, quotes, language switching. Needs a release build (swift build -c release);
+# the product path below is the one SwiftPM uses on this toolchain (.build/release points at it).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 P=.build/out/Products/Release

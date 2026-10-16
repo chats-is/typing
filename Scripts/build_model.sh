@@ -1,8 +1,7 @@
 #!/bin/bash
 # Turns a trained checkpoint into the Core ML model the input method bundles.
-# Usage: Scripts/build_model.sh Data/lm3/model.pt [output directory, default Resources] [key model checkpoint]
-# The vocabulary is taken from vocab.json next to the checkpoint. With a key model checkpoint
-# (Training/key_model.py) the key model is built too, and the input method runs without tables.
+# Usage: Scripts/build_model.sh Data/lm9/model.pt [output directory, default Resources]
+# The vocabulary is taken from vocab.json next to the checkpoint.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CHECKPOINT="${1:?usage: Scripts/build_model.sh <checkpoint.pt> [output directory]}"
@@ -15,9 +14,3 @@ mkdir -p build/tools
 swiftc -O Tools/compile_model.swift -o build/tools/compile_model
 build/tools/compile_model "$PACKAGE" "$OUT/LanguageModel.mlmodelc"
 cp "$(dirname "$CHECKPOINT")/vocab.json" "$OUT/vocab.json"
-if [ -n "${3:-}" ]; then
-    KEYS="$3"
-    KEYPACKAGE="$(dirname "$KEYS")/KeyModel.mlpackage"
-    Data/venv-train/bin/python Training/export_keys.py "$KEYS" "$KEYPACKAGE"
-    build/tools/compile_model "$KEYPACKAGE" "$OUT/KeyModel.mlmodelc"
-fi
