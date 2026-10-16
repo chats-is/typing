@@ -21,8 +21,8 @@ git tag v0.2 && git push origin main v0.2
 ## 用户安装步骤
 
 1. 双击 `.pkg` 安装；或打开 `.dmg` 把 App 拖进 Input Methods。
-2. 若输入法菜单里没有“智能拼音”，到 系统设置 › 键盘 › 输入法 添加，或注销后重新登录。
-3. 卸载：删除 `/Library/Input Methods/Typing.app`，并在 系统设置 › 键盘 › 输入法 里移除“智能拼音”；本机学习数据在 `~/Library/Containers/is.chats.typing`，不需要时一并删除。
+2. 若输入法菜单里没有“智能输入法”，到 系统设置 › 键盘 › 输入法 添加，或注销后重新登录。
+3. 卸载：删除 `/Library/Input Methods/Typing.app`，并在 系统设置 › 键盘 › 输入法 里移除“智能输入法”；本机学习数据在 `~/Library/Containers/is.chats.typing`，不需要时一并删除。
 
 ## 发布前检查
 
