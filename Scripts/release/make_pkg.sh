@@ -18,7 +18,10 @@ cat > "$STAGE/scripts/postinstall" <<'POST'
 APP="/Library/Input Methods/Typing.app"
 USER_NAME="$(stat -f%Su /dev/console)"
 pkill -x Typing 2>/dev/null || true
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ]; then
+    # Launch Services must resolve the bundle id to this copy (not a build or staging copy).
+    sudo -u "$USER_NAME" "$LSREGISTER" -f -R "$APP" >/dev/null 2>&1 || true
     sudo -u "$USER_NAME" "$(dirname "$0")/register" "$APP" || true
 fi
 exit 0
