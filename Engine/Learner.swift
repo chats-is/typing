@@ -27,6 +27,8 @@ public final class Learner {
     private let readings: Readings
     private let ids: [Character: Int32]
 
+    /// A fixed seed makes a session reproducible (tests); nil draws the training windows at random.
+    public var seed: UInt64?
     /// Session policy.
     public var minimumNewEntries = 20
     public var minimumInterval: TimeInterval = 600
@@ -240,7 +242,7 @@ public final class Learner {
                 // The trainer (fp32 copies, Adam state) lives only until its result is saved.
                 let trainer = try GraphTrainer(weights: shippedWeights)
                 let steps = min(maximumSteps, max(minimumSteps, stream.count / charactersPerStep))
-                var generator = SystemRandomNumberGenerator()
+                var generator: any RandomNumberGenerator = seed.map { SplitMix64(seed: $0) as any RandomNumberGenerator } ?? SystemRandomNumberGenerator()
                 for step in 1...steps {
                     waitWhilePaused()
                     if cancelled { outcome.reason = "cancelled"; return outcome }
@@ -284,5 +286,18 @@ public final class Learner {
         }
         outcome.seconds = Date().timeIntervalSince(started)
         return outcome
+    }
+}
+
+/// A small seeded generator (SplitMix64) for reproducible sessions.
+struct SplitMix64: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

@@ -301,6 +301,7 @@ if let learnDemo, let lexiconEngine, let graphWeightsPath {
     }
     learner.generalWordsURL = URL(fileURLWithPath: "Resources/general_words.tsv")
     learner.minimumNewEntries = 10
+    learner.seed = 1  // the demo is a test: same windows every run
     // As in the app: the engine's own scorer is "before" when it is the GPU runtime.
     learner.engineScorer = { engineSentenceScorer as? GraphScorer }
     // As when the person starts typing during a session: paused for 3 s, then resumed.
@@ -313,7 +314,7 @@ if let learnDemo, let lexiconEngine, let graphWeightsPath {
     let outcome = learner.runSession { print($0) }
     if outcome.accepted {
         // How lone words come out now, with learning gated to what the person wrote.
-        let tuned = try GraphScorer(weightsPath: graphWeightsPath, tunedPath: store.tunedBase, vocabularyURL: URL(fileURLWithPath: vocabularyPath ?? "Resources/vocab.json"))
+        let tuned = try GraphScorer(source: learnerSource, tunedPath: store.tunedBase, vocabularyURL: URL(fileURLWithPath: vocabularyPath ?? "Resources/vocab.json"))
         lexiconEngine.replaceScorer(tuned)
         lexiconEngine.baseScorer = scorer
         lexiconEngine.learnedWords = { store.hasLearned($0) }
