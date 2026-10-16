@@ -24,7 +24,7 @@ HAN = re.compile(r"[一-鿿]+")
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lexicon", default=os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite"))
-    parser.add_argument("--source", default=os.path.join(ROOT, "Data", "lm2", "holdout_dialogue.txt"))
+    parser.add_argument("--source", default=os.path.join(ROOT, "Data", "holdout", "holdout_dialogue.txt"))
     parser.add_argument("--count", type=int, default=3000)
     parser.add_argument("--seed", type=int, default=21)
     args = parser.parse_args()

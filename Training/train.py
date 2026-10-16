@@ -47,7 +47,7 @@ def batch_from(sources, weights, batch_size, block_size, device, generator):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm2"))
+    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm9"))
     parser.add_argument("--out", required=True)
     parser.add_argument("--layers", type=int, default=8)
     parser.add_argument("--heads", type=int, default=8)

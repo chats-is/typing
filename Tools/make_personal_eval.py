@@ -31,7 +31,7 @@ def main():
     parser.add_argument("--sentences", type=int, default=300)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    with open(os.path.join(ROOT, "Data", "lm2", f"holdout_{args.source}.txt"), encoding="utf-8") as f:
+    with open(os.path.join(ROOT, "Data", "holdout", f"holdout_{args.source}.txt"), encoding="utf-8") as f:
         documents = [d for d in f.read().split("\n\n") if d.strip()]
     documents.sort(key=len, reverse=True)
     doc = documents[args.rank]

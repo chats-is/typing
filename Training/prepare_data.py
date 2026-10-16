@@ -119,7 +119,7 @@ def lexicon_words():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default=os.path.join(ROOT, "Data", "lm2"))
+    parser.add_argument("--out", default=os.path.join(ROOT, "Data", "prepared"))
     parser.add_argument("--only-words", action="store_true", help="only rewrite words.bin with the existing vocabulary")
     parser.add_argument("--cased-from", default=None, help="keep English capitals, extending this directory's vocabulary")
     parser.add_argument("--add", default=None, help="comma-separated sources to write into an existing --out")

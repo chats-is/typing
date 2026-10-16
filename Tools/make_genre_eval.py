@@ -25,7 +25,7 @@ MIN_CONTEXT = 4
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm2"))
+    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "holdout"))
     args = parser.parse_args()
     with open(os.path.join(ROOT, "Resources", "readings.tsv"), encoding="utf-8") as f:
         syllables = {line.split("\t")[0] for line in f}

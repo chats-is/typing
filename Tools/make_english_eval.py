@@ -34,7 +34,7 @@ NOT_WORDS = {"xx", "xxx", "yy", "pp", "sb", "bb", "jb", "ooxx", "lz", "jy", "tm"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm2"))
+    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "holdout"))
     parser.add_argument("--cased", action="store_true")
     args = parser.parse_args()
     with open(os.path.join(ROOT, "Resources", "readings.tsv"), encoding="utf-8") as f:

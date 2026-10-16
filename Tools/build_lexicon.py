@@ -25,8 +25,8 @@ from pypinyin import Style, pinyin as to_pinyin
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEXICONS = os.path.join(ROOT, "Data", "lexicons")
 TABLE = os.path.join(LEXICONS, "all_words.tsv")
-COUNTS = os.environ.get("COUNTS", os.path.join(ROOT, "Data", "lexicon", "word_counts_vit.tsv"))  # Tools/count_words_viterbi.py (COUNTS=... overrides)
-READINGS = os.path.join(ROOT, "Data", "engine_old", "readings.tsv")
+COUNTS = os.environ.get("COUNTS", os.path.join(ROOT, "Data", "lexicon", "word_counts_vit3.tsv"))  # Tools/count_words_viterbi.py, 3 EM passes (COUNTS=... overrides)
+READINGS = os.path.join(ROOT, "Data", "lexicon", "readings.tsv")  # character → readings table
 ENGLISH = os.path.join(LEXICONS, "english", "en_50k.txt")
 CASING = os.path.join(ROOT, "Data", "lexicon", "english_casing.tsv")  # Tools/make_english_casing.py
 OUT = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
