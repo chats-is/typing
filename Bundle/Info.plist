@@ -20,48 +20,6 @@
 	<string>0.1</string>
 	<key>CFBundleVersion</key>
 	<string>7</string>
-	<key>ComponentInputModeDict</key>
-	<dict>
-		<key>tsInputModeListKey</key>
-		<dict>
-			<key>is.chats.typing.Pinyin</key>
-			<dict>
-				<key>TISIconIsTemplate</key>
-				<true/>
-				<key>TISIconLabels</key>
-				<dict>
-					<key>Primary</key>
-					<string>智</string>
-				</dict>
-				<key>TISInputSourceID</key>
-				<string>is.chats.typing.Pinyin</string>
-				<key>TISIntendedLanguage</key>
-				<string>zh-Hans</string>
-				<key>tsInputModeAlternateMenuIconFileKey</key>
-				<string>menu.pdf</string>
-				<key>tsInputModeCharacterRepertoireKey</key>
-				<array>
-					<string>Hans</string>
-				</array>
-				<key>tsInputModeDefaultStateKey</key>
-				<true/>
-				<key>tsInputModeIsVisibleKey</key>
-				<true/>
-				<key>tsInputModeMenuIconFileKey</key>
-				<string>menu.pdf</string>
-				<key>tsInputModePaletteIconFileKey</key>
-				<string>palette.png</string>
-				<key>tsInputModePrimaryInScriptKey</key>
-				<true/>
-				<key>tsInputModeScriptKey</key>
-				<string>smSimpChinese</string>
-			</dict>
-		</dict>
-		<key>tsVisibleInputModeOrderedArrayKey</key>
-		<array>
-			<string>is.chats.typing.Pinyin</string>
-		</array>
-	</dict>
 	<key>InputMethodConnectionName</key>
 	<string>is.chats.typing_Connection</string>
 	<key>InputMethodServerControllerClass</key>
@@ -90,6 +48,6 @@
 		<string>Hans</string>
 	</array>
 	<key>tsInputMethodIconFileKey</key>
-	<string>icon.pdf</string>
+	<string>menu.pdf</string>
 </dict>
 </plist>

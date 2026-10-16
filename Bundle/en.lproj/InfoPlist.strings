@@ -1,5 +1,4 @@
 /* Names shown in the input menu and in Keyboard settings. */
-CFBundleName = "Typing Input Method";
-CFBundleDisplayName = "Typing Input Method";
-"is.chats.typing" = "Typing Input Method";
-"is.chats.typing.Pinyin" = "Typing";
+CFBundleName = "Typing";
+CFBundleDisplayName = "Typing";
+"is.chats.typing" = "Typing";
