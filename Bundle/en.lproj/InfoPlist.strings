@@ -1,5 +1,5 @@
 /* Names shown in the input menu and in Keyboard settings. */
-CFBundleName = "Zhiyin Input Method";
-CFBundleDisplayName = "Zhiyin Input Method";
-"is.chats.zhiyin" = "Zhiyin Input Method";
-"is.chats.zhiyin.Pinyin" = "Zhiyin Pinyin";
+CFBundleName = "Typing Input Method";
+CFBundleDisplayName = "Typing Input Method";
+"is.chats.typing" = "Typing Input Method";
+"is.chats.typing.Pinyin" = "Typing Pinyin";

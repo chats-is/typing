@@ -1,7 +1,7 @@
 import Carbon
 import Foundation
 
-// Usage: register <path to Zhiyin.app>
+// Usage: register <path to Typing.app>
 // Registers the installed input method with the system and enables it.
 guard CommandLine.arguments.count == 2 else { exit(2) }
 let url = URL(fileURLWithPath: CommandLine.arguments[1])

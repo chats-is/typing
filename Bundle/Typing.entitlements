@@ -7,7 +7,7 @@
 	<true/>
 	<key>com.apple.security.temporary-exception.mach-register.global-name</key>
 	<array>
-		<string>is.chats.zhiyin_Connection</string>
+		<string>is.chats.typing_Connection</string>
 	</array>
 </dict>
 </plist>

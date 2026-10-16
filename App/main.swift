@@ -25,7 +25,7 @@ enum EngineHost {
                 }
                 return decoder
             } catch {
-                NSLog("Zhiyin: cannot open lexicon: \(error)")
+                NSLog("Typing: cannot open lexicon: \(error)")
             }
         }
         return nil
@@ -38,7 +38,7 @@ enum EngineHost {
         do {
             return try NeuralScorer(modelURL: model, vocabularyURL: vocabulary)
         } catch {
-            NSLog("Zhiyin: cannot load language model: \(error)")
+            NSLog("Typing: cannot load language model: \(error)")
             return nil
         }
     }
@@ -59,7 +59,7 @@ DispatchQueue.global(qos: .background).async {
 }
 let server = IMKServer(name: connectionName, bundleIdentifier: Bundle.main.bundleIdentifier)
 NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in
-    ZhiyinInputController.hidePanel()
+    TypingInputController.hidePanel()
 }
 // Warm up once at launch (model load, first Core ML call, lexicon caches) so the first keystroke
 // is as quick as the rest; the first decode otherwise takes over 100 ms.

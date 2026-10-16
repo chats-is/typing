@@ -48,10 +48,10 @@ jobs:
       - name: Release notes
         run: |
           {
-            echo "## 智音输入法 $VERSION"
+            echo "## 智能输入法 $VERSION"
             echo
-            echo "安装包 \`智音输入法-$VERSION.pkg\`：双击安装到 /Library/Input Methods 并启用（首次可能需要注销再登录）。"
-            echo "磁盘映像 \`智音输入法-$VERSION.dmg\`：打开后把 Zhiyin.app 拖进 Input Methods，再到 系统设置 › 键盘 › 输入法 添加。"
+            echo "安装包 \`智能输入法-$VERSION.pkg\`：双击安装到 /Library/Input Methods 并启用（首次可能需要注销再登录）。"
+            echo "磁盘映像 \`智能输入法-$VERSION.dmg\`：打开后把 Typing.app 拖进 Input Methods，再到 系统设置 › 键盘 › 输入法 添加。"
             echo "两者都是本机临时签名，首次打开需要在 系统设置 › 隐私与安全性 里允许。"
             echo
             echo "### 门槛"
@@ -63,9 +63,9 @@ jobs:
         with:
           body_path: notes.md
           files: |
-            dist/智音输入法-*.pkg
-            dist/智音输入法-*.pkg.sha256
-            dist/智音输入法-*.dmg
-            dist/智音输入法-*.dmg.sha256
+            dist/智能输入法-*.pkg
+            dist/智能输入法-*.pkg.sha256
+            dist/智能输入法-*.dmg
+            dist/智能输入法-*.dmg.sha256
             dist/typing-resources-*.tar.zst
             dist/typing-resources-*.sha256

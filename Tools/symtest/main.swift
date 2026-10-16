@@ -82,7 +82,7 @@ _ = NSApplication.shared
 UserDefaults.standard.removePersistentDomain(forName: "symtest")
 ShortcutStore.shared.resetDefaults()
 let client = FakeClient()
-final class TestController: ZhiyinInputController {
+final class TestController: TypingInputController {
     static var fake: FakeClient?
     override func client() -> (any IMKTextInput & NSObjectProtocol)! { TestController.fake }
 }

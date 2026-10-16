@@ -2,8 +2,8 @@ import Cocoa
 import Engine
 import InputMethodKit
 
-@objc(ZhiyinInputController)
-class ZhiyinInputController: IMKInputController {
+@objc(TypingInputController)
+class TypingInputController: IMKInputController {
     private static let panel = CandidatePanel()
     private static let pageSize = 9
     private static let noReplacement = NSRange(location: NSNotFound, length: NSNotFound)

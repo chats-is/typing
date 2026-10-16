@@ -34,7 +34,7 @@ enum Learning {
             guard store.hasTunedWeights else { return nil }
             return try tunedCoreMLScorer(vocabulary: vocabulary) ?? GraphScorer(source: weightsSource, tunedPath: store.tunedBase, vocabularyURL: vocabulary)
         } catch {
-            NSLog("Zhiyin: cannot load the tuned model: \(error)")
+            NSLog("Typing: cannot load the tuned model: \(error)")
             return nil
         }
     }
@@ -54,7 +54,7 @@ enum Learning {
             }
             return try NeuralScorer(modelURL: destination, vocabularyURL: vocabulary)
         } catch {
-            NSLog("Zhiyin: tuned Core ML model unavailable, using the GPU runtime: \(error)")
+            NSLog("Typing: tuned Core ML model unavailable, using the GPU runtime: \(error)")
             return nil
         }
     }
@@ -127,15 +127,15 @@ enum Learning {
         running = true
         let started = generation
         queue.async {
-            let outcome = learner.runSession { NSLog("Zhiyin learning: \($0)") }
-            NSLog("Zhiyin learning: \(outcome.accepted ? "kept" : "discarded") (\(outcome.reason)) steps \(outcome.steps) personal \(outcome.personalBefore)→\(outcome.personalAfter) general \(outcome.generalBefore)→\(outcome.generalAfter) in \(Int(outcome.seconds)) s")
+            let outcome = learner.runSession { NSLog("Typing learning: \($0)") }
+            NSLog("Typing learning: \(outcome.accepted ? "kept" : "discarded") (\(outcome.reason)) steps \(outcome.steps) personal \(outcome.personalBefore)→\(outcome.personalAfter) general \(outcome.generalBefore)→\(outcome.generalAfter) in \(Int(outcome.seconds)) s")
             // A kept model is written into a copy of the Core ML model here, off the main thread
             // (its first load compiles it for the Neural Engine), checked against the model that
             // was validated, and handed to the engine; the GPU model stands in if the copy differs.
             var kept: SentenceScorer? = outcome.scorer
             if outcome.accepted, let graph = outcome.scorer, let vocabulary = Bundle.main.url(forResource: "vocab", withExtension: "json"),
                let coreML = tunedCoreMLScorer(vocabulary: vocabulary) {
-                if agrees(coreML, graph) { kept = coreML } else { NSLog("Zhiyin learning: the Core ML copy disagrees with the validated model; using the GPU runtime") }
+                if agrees(coreML, graph) { kept = coreML } else { NSLog("Typing learning: the Core ML copy disagrees with the validated model; using the GPU runtime") }
             }
             DispatchQueue.main.async {
                 running = false

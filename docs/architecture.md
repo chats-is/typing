@@ -2,11 +2,11 @@
 
 三条主线：输入、学习、设置。其余都是开发工具。
 
-输入法本体叫“智音输入法”（bundle `is.chats.zhiyin`），拼音是它的一个输入模式 `is.chats.zhiyin.Pinyin`（菜单里显示“智音拼音”）。将来的语音输入作为第二个模式加进 `Info.plist` 的 `tsInputModeListKey`（如 `….Voice`，“智能语音”），和拼音共用设置窗口与学习目录，各自有自己的控制器逻辑。
+输入法本体叫“智能输入法”（bundle `is.chats.typing`），拼音是它的一个输入模式 `is.chats.typing.Pinyin`（菜单里显示“智能拼音”）。将来的语音输入作为第二个模式加进 `Info.plist` 的 `tsInputModeListKey`（如 `….Voice`，“智能语音”），和拼音共用设置窗口与学习目录，各自有自己的控制器逻辑。
 
 ## 输入
 
-每一键的路径（`App/ZhiyinInputController.swift` → `Engine/InputSession.swift` → `Engine/LexiconDecoder.swift`）：
+每一键的路径（`App/TypingInputController.swift` → `Engine/InputSession.swift` → `Engine/LexiconDecoder.swift`）：
 
 1. **格子解码（主线程，快）**。按键缓冲按音节切分（`SyllableMatcher`：全拼、简拼、未完成音节、邻键滑动），词库（`Lexicon`，SQLite，查询带锁和缓存）给出每一段能读成什么词，二元模型（`BigramModel`，词对概率，mmap）加上词频做 Viterbi，束宽 12，得到候选和整句读法。先按字面读，字面读不通时再做容错那一遍。增量缓存复用上一键的格子。
 2. **模型重排（后台队列，慢）**。整句读法多于一个时，`DecodeResult.refine` 闭包在一个串行队列上调用语言模型（`SentenceScorer`）给每个读法打分，和格子分数合并后重排；落回主线程时若会话代数没变才采用。闭包在加锁时拍下模型、基准模型和学习过滤器的快照，不再读可变属性。中途来了新键，闭包开头就返回。结果没变化时返回 nil，不刷新界面。
@@ -21,7 +21,7 @@
 
 ## 学习
 
-`App/Learning.swift` 调度，`Engine/Learner.swift` 执行，`Engine/LearningStore.swift` 存储（App 沙盒容器的 `Application Support/Zhiyin/learning/`）。
+`App/Learning.swift` 调度，`Engine/Learner.swift` 执行，`Engine/LearningStore.swift` 存储（App 沙盒容器的 `Application Support/Typing/learning/`）。
 
 - **记录**：每次上屏记一条（拼音、文字、前文），先压 3 秒；紧接着被删掉大半的不记。
 - **触发**：键盘空闲 20 秒，且自上次会话以来新增 ≥ 20 条、间隔 ≥ 10 分钟（或新增 ≥ 120 条）。

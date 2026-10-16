@@ -5,8 +5,8 @@
 ## 日常
 
 ```sh
-swift build -c release                 # Engine、Zhiyin、enginecli
-Scripts/build.sh                       # build/Zhiyin.app（签名、复制资源）
+swift build -c release                 # Engine、Typing、enginecli
+Scripts/build.sh                       # build/Typing.app（签名、复制资源）
 Scripts/install.sh                     # 装到 ~/Library/Input Methods 并重启输入法进程
 Scripts/gate.sh [私有回放文件]          # 装机门槛：四项词测试、每键计时、节奏模拟、并发压力、按键测试
 Scripts/symtest.sh                     # 只跑按键测试

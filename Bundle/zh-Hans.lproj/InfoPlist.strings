@@ -1,5 +1,5 @@
 /* Names shown in the input menu and in Keyboard settings. */
-CFBundleName = "智音输入法";
-CFBundleDisplayName = "智音输入法";
-"is.chats.zhiyin" = "智音输入法";
-"is.chats.zhiyin.Pinyin" = "智音拼音";
+CFBundleName = "智能输入法";
+CFBundleDisplayName = "智能输入法";
+"is.chats.typing" = "智能输入法";
+"is.chats.typing.Pinyin" = "智能拼音";
