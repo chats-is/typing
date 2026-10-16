@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export a trained checkpoint to Core ML for the input method.
 
-    Data/venv-train/bin/python Training/export_coreml.py Data/lm/model.pt Data/lm/LanguageModel.mlpackage
+    Data/venv-train/bin/python Training/export_coreml.py Data/lm9/model.pt Data/lm9/LanguageModel32.mlpackage
 
 The exported model takes a fixed batch of token rows and returns, per row:
   target_logp  log-probability of targets[t] following ids[..t]   (candidate reranking)

@@ -3,7 +3,7 @@
 their later input come out right more often, without hurting everyone's input?
 
     venv/bin/python Training/personalize_eval.py --model Data/lm9/model.pt --vocab Data/lm9/vocab.json \
-        --train Data/personal/forum0.train.txt --eval Data/personal/forum0.lattice.tsv \
+        --train Data/personal/forum2.train.txt --eval Data/personal/forum2.lattice.tsv \
         --control Data/personal/dialogue.lattice.tsv --steps 400 --eval-every 100
 
 --eval / --control are lattice dumps from `enginecli --no-rerank --dump-lattice`: every line holds

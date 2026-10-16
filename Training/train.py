@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train the language model on the Mac's GPU.
 
-    Data/venv-train/bin/python Training/train.py --data Data/lm2 --out Data/lm2/model.pt --steps 40000
+    Data/venv-train/bin/python Training/train.py --data Data/lm9 --out Data/lm9/model.pt --init Data/base/lm3_model.pt --lr 5e-5 --steps 6000
 
 --data is a directory written by prepare_data.py. Every batch mixes its sources in the
 proportions given by sources.json. Stops after --steps (or --hours), saving a checkpoint every
@@ -10,7 +10,7 @@ proportions given by sources.json. Stops after --steps (or --hours), saving a ch
 --init model.pt starts from another run's weights instead of from scratch (with a fresh optimizer
 and learning-rate schedule). --block widens its window; the new positions are spread out from the
 old ones. If --data has a larger vocabulary, as after prepare_data.py
---cased-from, the new tokens start as copies of their small letters (key tokens "⌨a" from make_ime_data.py
+--cased-from, the new tokens start as copies of their small letters (key tokens "⌨a" of an earlier key-model experiment
 as copies of their letters).
 """
 import argparse
@@ -72,7 +72,7 @@ def main():
     if args.only:
         shares = {name: shares[name] for name in args.only.split(",")}
     def source(name):
-        # <name>.rows (from make_ime_data.py) holds rows of block_size + 1 tokens, <pad>-filled.
+        # <name>.rows (an earlier key-model experiment) holds rows of block_size + 1 tokens, <pad>-filled.
         rows = os.path.join(args.data, f"{name}.rows")
         if os.path.exists(rows):
             return np.memmap(rows, dtype="<u2", mode="r").reshape(-1, config.block_size + 1)

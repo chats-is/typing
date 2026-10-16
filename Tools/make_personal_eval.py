@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Material for the level-4 (learning) verification: one long text by one "person", split in time.
 
-    Data/venv-train/bin/python Tools/make_personal_eval.py --source forum --rank 0 --out Data/personal/forum0
+    Data/venv-train/bin/python Tools/make_personal_eval.py --source forum --rank 2 --out Data/personal/forum2
 
 Takes the --rank-th largest held-out document of --source (a forum thread, a novel), writes:
   <out>.train.txt   the first --split of it (what the person has typed and confirmed so far)

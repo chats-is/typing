@@ -2,7 +2,7 @@
 """Count how often every candidate word is typed as a unit in everyday text, by probabilistic
 segmentation.
 
-    Data/venv-train/bin/python Tools/count_words_viterbi.py [--iterations 2] [--out Data/lexicon/word_counts_vit.tsv]
+    Data/venv-train/bin/python Tools/count_words_viterbi.py [--iterations 3] [--out Data/lexicon/word_counts_vit3.tsv]
 
 Why: Training/count_words.py --segment 6 cut the text with a longest-match dictionary of words that
 six or more lexicons list. Everyday words outside that dictionary (眼熟, 没啦, 有啊, 高了, 也成,
@@ -101,8 +101,8 @@ def set_logp(table):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--iterations", type=int, default=2)
-    parser.add_argument("--out", default=os.path.join(ROOT, "Data", "lexicon", "word_counts_vit.tsv"))
+    parser.add_argument("--iterations", type=int, default=3)  # the shipped lexicon used 3 passes
+    parser.add_argument("--out", default=os.path.join(ROOT, "Data", "lexicon", "word_counts_vit3.tsv"))
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     started = time.time()

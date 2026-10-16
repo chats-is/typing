@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Write Data/eval_english_mix.tsv: Chinese text with an English word in it, typed in one go.
 
-    Data/venv-train/bin/python Tools/make_english_eval.py [--data Data/lm2]
-    Data/venv-train/bin/python Tools/make_english_eval.py --data Data/lm3 --cased
+    Data/venv-train/bin/python Tools/make_english_eval.py [--data Data/holdout]
+    Data/venv-train/bin/python Tools/make_english_eval.py --data Data/lm9 --cased
 
 The sentences come from the held-out text of prepare_data.py (news, mixed, forum, dialogue),
 which the model never trains on. Two patterns, in the fourth column:
@@ -10,7 +10,7 @@ which the model never trains on. Two patterns, in the fourth column:
   word      the English word on its own, with all the text before it as context ("bug")
 The English word must be in the English word list the model trained on, and no word is used
 more than a few times, so a handful of frequent acronyms does not decide the score.
-Held-out text from Data/lm2 is lowercase. With --cased (on the held-out text of a directory written
+Held-out text from Data/holdout is lowercase. With --cased (on the held-out text of a directory written
 by prepare_data.py --cased-from) the expected English keeps its case ("iPhone", "CEO") while the
 typed letters stay lowercase, and the file is Data/eval_english_cased.tsv. The same spans are chosen.
 """

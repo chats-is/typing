@@ -3,7 +3,7 @@
 the language model learns which characters form words and how common each word is (what it needs
 to read an isolated word typed without any text before it).
 
-    Data/venv-train/bin/python Training/make_words.py --out Data/lm4
+    Data/venv-train/bin/python Training/make_words.py --out Data/lm9
 
 Words come from Data/lexicons/all_words.tsv (word, pinyin, weight, count). Only words of 2-4
 characters with a positive weight are used; the draw is 85% by weight^0.8 (frequent words recur,

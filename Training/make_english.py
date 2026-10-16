@@ -2,7 +2,7 @@
 """Write <out>/english.bin: English words as the corpora write them, so the model learns not only
 the spelling but the casing of each word (iPhone, macOS, NASA, Python) and how common it is.
 
-    Data/venv-train/bin/python Training/make_english.py --out Data/lm5
+    Data/venv-train/bin/python Training/make_english.py --out Data/lm9
 
 Casings are counted in the cased token streams of the training data (web, mixed, techdocs,
 forum, dialogue, tatoeba): a word is written in its most frequent casing when that casing has at
@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
     parser.add_argument("--bos", action="store_true", help="start every line with <bos>, as documents do, so an isolated word is read as a document of its own")
-    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm3"), help="where the cased token streams are")
+    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm9"), help="where the cased token streams are")
     args = parser.parse_args()
     with open(os.path.join(args.out, "vocab.json"), encoding="utf-8") as f:
         vocab = json.load(f)

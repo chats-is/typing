@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write Data/eval_abbr_mix.tsv and Data/eval_typo_mix.tsv from the genre test sets.
 
-    Data/venv/bin/python Tools/make_input_eval.py
+    Data/venv-train/bin/python Tools/make_input_eval.py
 
 The sentences (and the text before them) come from Data/eval_{dialogue,mixed,news,forum}.tsv,
 150 from each, so both sets measure the same kinds of text users type.

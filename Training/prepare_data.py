@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn the collected corpora into token files for language model training.
 
-    Data/venv-train/bin/python Training/prepare_data.py [--out Data/lm2]
+    Data/venv-train/bin/python Training/prepare_data.py [--out Data/prepared]
 
 For every source in sources.py this writes <out>/<source>.bin (flat little-endian uint16 token
 ids) and <out>/holdout_<source>.txt (documents kept out of training, separated by a blank line,
@@ -11,7 +11,7 @@ for evaluation). It also writes <out>/vocab.json (a JSON list, index = token id)
 Tokens are single characters: Chinese by character, everything else lowercased character by
 character. Documents written mostly in traditional characters are dropped.
 
---cased-from Data/lm2 keeps the case of English letters instead ("iPhone", "CEO"): it reuses that
+--cased-from Data/lm9 keeps the case of English letters instead ("iPhone", "CEO"): it reuses that
 directory's vocabulary, so a model trained on it can be trained further, and adds the 26
 capital letters at the end. Other capitals (Greek, Cyrillic) still read as their small letters.
 The documents and the held-out split are the same as without it.

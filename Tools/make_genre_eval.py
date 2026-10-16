@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write Data/eval_<source>.tsv for every source: held-out sentences with the text before them.
 
-    Data/venv-train/bin/python Tools/make_genre_eval.py [--data Data/lm2]
+    Data/venv-train/bin/python Tools/make_genre_eval.py [--data Data/holdout]
 
 Each line is "pin yin<TAB>sentence<TAB>preceding text" (up to 60 characters; line breaks written
 as a literal \\n). The sentences come from the holdout_<source>.txt files of prepare_data.py,
