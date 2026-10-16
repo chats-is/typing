@@ -5,6 +5,7 @@
 - `.github/workflows/ci.yml`：推送到 `main` 或提 PR 时，在 macOS 15 运行器上构建、跑按键测试和四项词测试、打包 App。
 - `.github/workflows/release.yml`：推一个 `v*` 标签（如 `v0.2`）时，把标签写进 `Info.plist` 的版本号（构建号取提交数），跑完整门槛 `Scripts/gate.sh`，然后发布：
   - `智能拼音-<版本>.pkg`：标准 macOS 安装包（`Scripts/release/make_pkg.sh`，pkgbuild），装到 `/Library/Input Methods`，安装后脚本为当前登录用户注册并启用；
+  - `智能拼音-<版本>.dmg`：磁盘映像（`Scripts/release/make_dmg.sh`，hdiutil），内含 `Typing.app`、指向 `/Library/Input Methods` 的链接和说明，拖放安装后到系统设置里添加；
   - `智能拼音-<版本>.zip`：`Typing.app`、`register`（注册工具）、`安装.command`、`卸载.command`、README、LICENSE，装到用户目录，附 sha256；
   - `typing-resources-<日期>.tar.zst`：词库、二元模型、模型、权重、词表的归档，给没有 Git LFS 的开发环境。
 
@@ -20,7 +21,7 @@ git tag v0.2 && git push origin main v0.2
 
 ## 用户安装步骤
 
-1. 双击 `.pkg` 安装（或解压 zip 后双击 `安装.command`）。
+1. 双击 `.pkg` 安装；或打开 `.dmg` 把 App 拖进 Input Methods；或解压 zip 后双击 `安装.command`。
 2. 若输入法菜单里没有“智能拼音”，到 系统设置 › 键盘 › 输入法 添加，或注销后重新登录。
 3. 卸载：pkg 装的删除 `/Library/Input Methods/Typing.app`；zip 装的双击 `卸载.command`。
 
