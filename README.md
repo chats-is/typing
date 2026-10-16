@@ -12,7 +12,7 @@ macOS 原生拼音输入法：词库 + 语言模型决定候选，模型只在�
 App/        输入法本身：IMKInputController、候选面板、设置窗口、快捷键、学习调度
 Engine/     引擎：词库（SQLite）、二元模型、音节匹配、格子解码与模型重排、输入会话；
             学习：记录库、MPSGraph 训练器、Core ML / MPSGraph 两种模型运行方式、学习会话、写回模型
-Resources/  装进 App 的资源：lexicon.sqlite、bigram.bin、LanguageModel.mlmodelc、weights.bin/json、vocab.json、
+Resources/  装进 App 的资源：lexicon.sqlite、bigram.bin、LanguageModel.mlmodelc、positions.bin、weights.json、vocab.json、
             general_lattices.tsv、general_words.tsv（大文件不在仓库里，见下）
 Bundle/     Info.plist、entitlements、本地化
 Scripts/    build.sh install.sh gate.sh symtest.sh build_model.sh
@@ -31,7 +31,7 @@ docs/       架构、开发流程、决策记录、基准数字
 Scripts/install.sh      # swift build → build/Typing.app → ~/Library/Input Methods，并启用
 ```
 
-`Resources/` 里的四个大文件（lexicon.sqlite 144 MB、bigram.bin 180 MB、LanguageModel.mlmodelc 57 MB、weights.bin 57 MB）用 Git LFS 存放：装了 `git-lfs`（`brew install git-lfs && git lfs install`）再 clone 就能直接构建。没有 LFS 的环境可以用发布包：`Scripts/package_resources.sh` 打包带校验和的归档，`Scripts/fetch_resources.sh <归档>` 解到 `Resources/`。也可以按 `docs/development.md` 用工具链重新生成。`Scripts/build.sh` 在缺文件时会报错指出。
+`Resources/` 里的三个大文件（lexicon.sqlite 109 MB、bigram.bin 98 MB、LanguageModel.mlmodelc 57 MB）用 Git LFS 存放：装了 `git-lfs`（`brew install git-lfs && git lfs install`）再 clone 就能直接构建。没有 LFS 的环境可以用发布包：`Scripts/package_resources.sh` 打包带校验和的归档，`Scripts/fetch_resources.sh <归档>` 解到 `Resources/`。也可以按 `docs/development.md` 用工具链重新生成。`Scripts/build.sh` 在缺文件时会报错指出。
 
 ## 测试
 

@@ -19,7 +19,7 @@ public final class Learner {
     }
 
     public let store: LearningStore
-    public let weightsPath: String
+    public let weights: GraphScorer.WeightsSource
     public let vocabularyURL: URL
     public let generalLatticesURL: URL?
     /// Lone common words (lexicon order expected): learning may move them only within tolerance.
@@ -68,8 +68,8 @@ public final class Learner {
 
     private static let contextWeight = 2.0, latticeWeight = 1.0
 
-    public init(store: LearningStore, weightsPath: String, vocabularyURL: URL, generalLatticesURL: URL?, readings: @escaping Readings) throws {
-        self.store = store; self.weightsPath = weightsPath; self.vocabularyURL = vocabularyURL
+    public init(store: LearningStore, weights: GraphScorer.WeightsSource, vocabularyURL: URL, generalLatticesURL: URL?, readings: @escaping Readings) throws {
+        self.store = store; self.weights = weights; self.vocabularyURL = vocabularyURL
         self.generalLatticesURL = generalLatticesURL; self.readings = readings
         let vocabulary = try JSONDecoder().decode([String].self, from: Data(contentsOf: vocabularyURL))
         var ids: [Character: Int32] = [:]
@@ -198,7 +198,7 @@ public final class Learner {
         do {
             // Each session learns the current material from the shipped weights, so what was learned is
             // always exactly a function of the entries the person can see and delete.
-            let shippedWeights = try GraphScorer.Weights(path: weightsPath)
+            let shippedWeights = try weights.load()
             let hasTuned = store.hasTunedWeights
             waitWhilePaused()
             let personalCases = heldOut.map { Case(expected: $0.text, context: $0.context, readings: readings($0.keys, $0.context)) }

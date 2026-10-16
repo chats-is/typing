@@ -63,6 +63,43 @@ public final class GraphScorer: SentenceScorer {
             return true
         }
 
+        /// The shipped weights as the input method carries them: the fp16 constants of the compiled
+        /// Core ML model (model.mil names each tensor and its place in weights/weight.bin), the full
+        /// position table (the 32-row model keeps only its first rows) and the architecture from
+        /// the header file. One copy of the model in the bundle serves both runtimes and learning.
+        public init(compiledModel: URL, positions: URL, header: URL) throws {
+            let head = try JSONDecoder().decode(Header.self, from: Data(contentsOf: header))
+            config = head.config
+            let blob = try Data(contentsOf: compiledModel.appendingPathComponent("weights/weight.bin"), options: .mappedIfSafe)
+            tensors = [:]
+            for (milName, entry) in try TunedModel.constants(in: compiledModel) {
+                guard milName.hasPrefix("model_"), milName.hasSuffix("_to_fp16") else { continue }
+                var name = String(milName.dropFirst("model_".count).dropLast("_to_fp16".count))
+                if name.hasPrefix("blocks_") {
+                    let rest = name.dropFirst("blocks_".count)
+                    guard let underscore = rest.firstIndex(of: "_") else { continue }
+                    name = "blocks." + rest[..<underscore] + "." + rest[rest.index(after: underscore)...]
+                }
+                for suffix in ["_weight", "_bias"] where name.hasSuffix(suffix) { name = String(name.dropLast(suffix.count)) + "." + suffix.dropFirst() }
+                if name == "positions.weight" || name == "causal" { continue }
+                guard entry.offset + 24 <= blob.count else { throw NSError(domain: "GraphScorer", code: 2, userInfo: [NSLocalizedDescriptionKey: "\(milName): entry outside weight.bin"]) }
+                let size = Int(blob.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: entry.offset + 8, as: UInt64.self) })
+                let start = Int(blob.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: entry.offset + 16, as: UInt64.self) })
+                guard start + size <= blob.count, size == entry.shape.reduce(1, *) * 2 else {
+                    throw NSError(domain: "GraphScorer", code: 2, userInfo: [NSLocalizedDescriptionKey: "\(milName): \(size) bytes for shape \(entry.shape)"])
+                }
+                tensors[name] = (entry.shape, blob.subdata(in: start ..< start + size))
+            }
+            let table = try Data(contentsOf: positions)
+            guard let d = config["d_model"], let rows = config["block_size"], table.count == rows * d * 2 else {
+                throw NSError(domain: "GraphScorer", code: 2, userInfo: [NSLocalizedDescriptionKey: "positions table does not match the model"])
+            }
+            tensors["positions.weight"] = ([rows, d], table)
+            guard tensors["tokens.weight"] != nil, tensors["ln.weight"] != nil, tensors["blocks.0.qkv.weight"] != nil else {
+                throw NSError(domain: "GraphScorer", code: 2, userInfo: [NSLocalizedDescriptionKey: "compiled model has no language-model constants"])
+            }
+        }
+
         /// Replaces tensors with those of a tuned file (same model, same names and shapes).
         public mutating func apply(tuned: Weights) {
             guard matches(tuned: tuned) else { return }
@@ -162,11 +199,28 @@ public final class GraphScorer: SentenceScorer {
     }
 
     public convenience init(weightsPath: String, tunedPath: String? = nil, vocabularyURL: URL, rowLength: Int = 32) throws {
-        var weights = try Weights(path: weightsPath)
+        try self.init(source: .files(base: weightsPath), tunedPath: tunedPath, vocabularyURL: vocabularyURL, rowLength: rowLength)
+    }
+
+    public convenience init(source: WeightsSource, tunedPath: String? = nil, vocabularyURL: URL, rowLength: Int = 32) throws {
+        var weights = try source.load()
         if let tunedPath, FileManager.default.fileExists(atPath: tunedPath + ".json") {
             weights.apply(tuned: try Weights(path: tunedPath))
         }
         try self.init(weights: weights, vocabularyURL: vocabularyURL, rowLength: rowLength)
+    }
+
+    /// Where the shipped weights come from: a weights.json/.bin pair (development), or the compiled
+    /// Core ML model plus the position table and header the input method bundles.
+    public enum WeightsSource {
+        case files(base: String)
+        case compiledModel(URL, positions: URL, header: URL)
+        public func load() throws -> Weights {
+            switch self {
+            case .files(let base): return try Weights(path: base)
+            case .compiledModel(let model, let positions, let header): return try Weights(compiledModel: model, positions: positions, header: header)
+            }
+        }
     }
 
     // MARK: - Tokens

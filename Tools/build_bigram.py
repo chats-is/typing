@@ -7,9 +7,13 @@ Han runs of the token streams (the same everyday mixture Training/count_words.py
 segmented into lexicon words (unigram Viterbi under the lexicon's own frequencies) and the word
 pairs counted. Word ids are the lexicon's wid, so the file belongs to one lexicon.sqlite build.
 
-bigram.bin layout (little endian): "BGM1", uint32 count, count sorted uint64 keys
-(w1 << 32 | w2, w1 == 0 meaning sentence start), count float32 P(w2 | w1).
+bigram.bin layout "BGM2" (little endian): uint32 rows (= largest w1 + 2), uint32 count, then
+rows + 1 uint32 row starts, count uint32 second words (sorted within each row), count float16
+log2 P(w2 | w1). w1 == 0 means sentence start. The counts of every pair are cached in
+bigram_counts.npz so other --min-count values can be written without recounting
+(--from-counts).
 """
+import argparse
 import json
 import multiprocessing
 import os
@@ -30,6 +34,7 @@ LEXICON = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
 OUT = os.path.join(ROOT, "Data", "lexicon", "bigram.bin")
 MAX_WORD_CHARS = 4
 MIN_COUNT = 3
+COUNTS_CACHE = os.path.join(ROOT, "Data", "lexicon", "bigram_counts.npz")
 CHUNK = 20_000_000
 HAN_RUN = re.compile(r"[一-鿿]+")
 
@@ -87,8 +92,44 @@ def merge(parts):
     return unique, np.bincount(inverse, weights=counts, minlength=len(unique)).astype(np.int64)
 
 
+def write_bgm2(keys, probabilities, out):
+    """Compressed rows: one start offset per first word, second words and log2 probabilities per pair."""
+    firsts = (keys >> np.uint64(32)).astype(np.int64)
+    seconds = (keys & np.uint64(0xFFFFFFFF)).astype("<u4")
+    rows = int(firsts.max()) + 2 if len(firsts) else 1
+    starts = np.zeros(rows + 1, dtype="<u4")
+    np.add.at(starts, firsts + 1, 1)
+    starts = np.cumsum(starts).astype("<u4")
+    values = np.log2(probabilities.astype(np.float64)).astype("<f2")
+    with open(out, "wb") as f:
+        f.write(b"BGM2")
+        f.write(struct.pack("<II", rows, len(keys)))
+        f.write(starts.tobytes())
+        f.write(seconds.tobytes())
+        f.write(values.tobytes())
+
+
+def write(keys, counts, min_count, out):
+    firsts = keys >> np.uint64(32)
+    totals = np.bincount(firsts.astype(np.int64), weights=counts)  # over every pair, before pruning
+    keep = (counts >= min_count) & ((keys & np.uint64(0xFFFFFFFF)) != 0)
+    keys, counts, firsts = keys[keep], counts[keep], firsts[keep]
+    probabilities = counts / totals[firsts.astype(np.int64)]
+    write_bgm2(keys, probabilities, out)
+    print(f"wrote {out}: {len(keys):,} bigrams (count >= {min_count}), {os.path.getsize(out) / 1e6:.0f} MB")
+
+
 def main():
     global TEXT
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--min-count", type=int, default=MIN_COUNT)
+    parser.add_argument("--out", default=OUT)
+    parser.add_argument("--from-counts", action="store_true", help="reuse the cached counts instead of recounting")
+    args = parser.parse_args()
+    if args.from_counts:
+        cached = np.load(COUNTS_CACHE)
+        write(cached["keys"], cached["counts"], args.min_count, args.out)
+        return
     started = time.time()
     db = sqlite3.connect(LEXICON)
     for word, wid, logp in db.execute("SELECT word, wid, MAX(logp) FROM lexicon GROUP BY word"):
@@ -129,18 +170,9 @@ def main():
         print(f"{name}: {total / 1e6:.0f}M characters, {len(merged[0]):,} distinct bigrams ({time.time() - started:.0f}s)", flush=True)
     pool.close()
     keys, counts = merged
-
-    firsts = keys >> np.uint64(32)
-    totals = np.bincount(firsts.astype(np.int64), weights=counts)
-    keep = (counts >= MIN_COUNT) & ((keys & np.uint64(0xFFFFFFFF)) != 0)
-    keys, counts, firsts = keys[keep], counts[keep], firsts[keep]
-    probabilities = (counts / totals[firsts.astype(np.int64)]).astype("<f4")
-    with open(OUT, "wb") as f:
-        f.write(b"BGM1")
-        f.write(struct.pack("<I", len(keys)))
-        f.write(keys.astype("<u8").tobytes())
-        f.write(probabilities.tobytes())
-    print(f"wrote {OUT}: {len(keys):,} bigrams, {os.path.getsize(OUT) / 1e6:.0f} MB ({time.time() - started:.0f}s)")
+    np.savez_compressed(COUNTS_CACHE, keys=keys.astype("<u8"), counts=counts.astype(np.uint32))
+    print(f"cached {len(keys):,} pair counts in {COUNTS_CACHE} ({time.time() - started:.0f}s)")
+    write(keys, counts, args.min_count, args.out)
 
 
 if __name__ == "__main__":

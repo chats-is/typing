@@ -125,7 +125,11 @@ do {
     var sentenceScorer: SentenceScorer? = scorer
     if let graphWeightsPath {
         let started = Date()
-        sentenceScorer = try GraphScorer(weightsPath: graphWeightsPath, tunedPath: tunedWeightsPath, vocabularyURL: URL(fileURLWithPath: vocabularyPath ?? "Resources/vocab.json"))
+        // A .mlmodelc path reads the weights out of the compiled model, as the input method does.
+        let source: GraphScorer.WeightsSource = graphWeightsPath.hasSuffix(".mlmodelc")
+            ? .compiledModel(URL(fileURLWithPath: graphWeightsPath), positions: URL(fileURLWithPath: "Resources/positions.bin"), header: URL(fileURLWithPath: "Resources/weights.json"))
+            : .files(base: graphWeightsPath)
+        sentenceScorer = try GraphScorer(source: source, tunedPath: tunedWeightsPath, vocabularyURL: URL(fileURLWithPath: vocabularyPath ?? "Resources/vocab.json"))
         FileHandle.standardError.write("graph scorer ready in \(String(format: "%.1f", Date().timeIntervalSince(started))) s\n".data(using: .utf8)!)
     }
     if graphWeightsPath == nil, let tunedWeightsPath, let modelPath {
@@ -288,7 +292,10 @@ if let learnDemo, let lexiconEngine, let graphWeightsPath {
     store.flush()
     print("store: \(store.count) entries in \(directory.path)")
     let general = URL(fileURLWithPath: "Data/personal/dialogue.lattice.tsv")
-    let learner = try Learner(store: store, weightsPath: graphWeightsPath, vocabularyURL: URL(fileURLWithPath: vocabularyPath ?? "Resources/vocab.json"), generalLatticesURL: general) { keys, context in
+    let learnerSource: GraphScorer.WeightsSource = graphWeightsPath.hasSuffix(".mlmodelc")
+        ? .compiledModel(URL(fileURLWithPath: graphWeightsPath), positions: URL(fileURLWithPath: "Resources/positions.bin"), header: URL(fileURLWithPath: "Resources/weights.json"))
+        : .files(base: graphWeightsPath)
+    let learner = try Learner(store: store, weights: learnerSource, vocabularyURL: URL(fileURLWithPath: vocabularyPath ?? "Resources/vocab.json"), generalLatticesURL: general) { keys, context in
         let quick = lexiconEngine.decode(keys, precedingText: context)  // lattice order; the model's look is deferred and not taken
         return quick.sentences.map { (text: $0.text, score: $0.score, penalty: $0.penalty) }
     }

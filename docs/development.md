@@ -27,7 +27,7 @@ Scripts/symtest.sh                     # 只跑按键测试
 | `eval_*.tsv`、`wordlattice/`、`personal/` | 评测集、词测试的格子导出、学习验证材料 | 下面的评测流程 |
 | `venv-train/` | Python 环境（PyTorch、coremltools、pypinyin） | `python -m venv` + pip |
 
-`Resources/` 里的四个大文件就是 `lexicon/lexicon.sqlite`、`lexicon/bigram.bin`、`lm9/LanguageModel32.mlmodelc`、`lm9/weights.bin` 的拷贝。
+`Resources/` 里的三个大文件就是 `lexicon/lexicon.sqlite`、`lexicon/bigram.bin`、`lm9/LanguageModel32.mlmodelc` 的拷贝；`positions.bin` 由 `Tools/extract_positions.py` 从 `lm9/weights` 取出（完整 64 行位置表），`weights.json` 只保留结构参数。
 
 ## 评测
 
@@ -70,7 +70,7 @@ $P Tools/merge_lexicons.py                                   # → Data/lexicons
 $P Tools/count_words_viterbi.py                              # → Data/lexicon/word_counts_vit3.tsv（概率分词计数，3 轮）
 $P Tools/make_english_casing.py                              # → Data/lexicon/english_casing.tsv
 $P Tools/build_lexicon.py                                    # → Data/lexicon/lexicon.sqlite
-$P Tools/build_bigram.py                                     # → Data/lexicon/bigram.bin（词 id 绑定这份词库）
+$P Tools/build_bigram.py                                     # → Data/lexicon/bigram.bin（词 id 绑定这份词库；词对计数缓存在 bigram_counts.npz，--from-counts --min-count N 可快速重写）
 cp Data/lexicon/lexicon.sqlite Data/lexicon/bigram.bin Resources/
 Scripts/gate.sh
 ```
@@ -89,7 +89,8 @@ $P Training/train.py --data Data/prepared --out Data/prepared/model.pt \
 $P Training/eval_checkpoint.py --model Data/prepared/model.pt --vocab Data/prepared/vocab.json \
     Data/wordlattice/word_mixed.lattice.tsv Data/wordlattice/word_full.lattice.tsv   # 不导出先看主指标
 LM_ROWS=32 Scripts/build_model.sh Data/prepared/model.pt   # → Resources/LanguageModel.mlmodelc、vocab.json
-$P Training/export_weights.py Data/prepared/model.pt Resources/weights   # → weights.bin/json（GPU 运行与本机学习）
+$P Training/export_weights.py Data/prepared/model.pt Data/prepared/weights   # → weights.bin/json（开发用）
+python3 Tools/extract_positions.py Data/prepared/weights Resources/positions.bin   # 位置表；weights.json 只需 config
 Scripts/gate.sh
 ```
 

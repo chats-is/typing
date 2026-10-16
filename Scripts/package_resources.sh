@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 OUT="${1:-build}"
 mkdir -p "$OUT"
 NAME="typing-resources-$(date +%Y%m%d)"
-FILES=(Resources/lexicon.sqlite Resources/bigram.bin Resources/LanguageModel.mlmodelc Resources/weights.bin Resources/weights.json Resources/vocab.json)
+FILES=(Resources/lexicon.sqlite Resources/bigram.bin Resources/LanguageModel.mlmodelc Resources/weights.json Resources/positions.bin Resources/vocab.json)
 for f in "${FILES[@]}"; do [ -e "$f" ] || { echo "missing $f" >&2; exit 1; }; done
 tar --zstd -cf "$OUT/$NAME.tar.zst" "${FILES[@]}"
 (cd "$OUT" && shasum -a 256 "$NAME.tar.zst" > "$NAME.sha256")

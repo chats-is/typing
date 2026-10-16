@@ -40,7 +40,7 @@
 
 ## 文件格式
 
-- `weights.json/.bin`：`{"config", "tensors":[{"name","shape","offset","count"}]}` + fp16 连续数据（微调文件为 fp32，`dtype_bits: 32`）。
-- `bigram.bin`：`"BGM1"`、uint32 数量、排序的 uint64 键（w1<<32|w2，w1=0 表示句首）、float32 P(w2|w1)。
+- 出厂权重：直接从 `LanguageModel.mlmodelc` 读（`model.mil` 给出每个常量的位置），加 `positions.bin`（完整 64 行位置表，fp16）和 `weights.json`（只含结构参数）；开发时的 `weights.json/.bin` 导出格式为 `{"config", "tensors":[{"name","shape","offset","count"}]}` + fp16 连续数据（微调文件为 fp32，`dtype_bits: 32`）。
+- `bigram.bin`：`"BGM2"`、uint32 行数、uint32 词对数、每个首词一个起点偏移（uint32）、各行内排序的后词 uint32、float16 的 log2 P(w2|w1)；w1=0 表示句首。旧的 `"BGM1"`（uint64 键 + float32）仍能读。
 - `lexicon.sqlite`：`lexicon(key, n, wid, word, logp, abbr)`、`english(key, word, logp)`，key 为撇号连接的音节。
 - `entries.jsonl`、`state.json`、`exclusions.json`、`tuned.json/.bin`、`TunedModel.mlmodelc` + `TunedModel.stamp`：学习目录。

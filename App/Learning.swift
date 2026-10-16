@@ -17,18 +17,22 @@ enum Learning {
 
     static var enabled: Bool { UserDefaults.standard.object(forKey: "LearningEnabled") as? Bool ?? true }
 
-    private static var weightsPath: String? {
-        Bundle.main.url(forResource: "weights", withExtension: "bin").map { $0.deletingPathExtension().path }
+    /// The shipped weights: read out of the bundled Core ML model (one copy serves both runtimes).
+    private static var weightsSource: GraphScorer.WeightsSource? {
+        guard let model = Bundle.main.url(forResource: "LanguageModel", withExtension: "mlmodelc"),
+              let positions = Bundle.main.url(forResource: "positions", withExtension: "bin"),
+              let header = Bundle.main.url(forResource: "weights", withExtension: "json") else { return nil }
+        return .compiledModel(model, positions: positions, header: header)
     }
 
     /// The tuned model to start with, if learning is on and a kept session exists.
     static func initialScorer() -> SentenceScorer? {
-        guard enabled, store.hasTunedWeights, let weightsPath, let vocabulary = Bundle.main.url(forResource: "vocab", withExtension: "json") else { return nil }
+        guard enabled, store.hasTunedWeights, let weightsSource, let vocabulary = Bundle.main.url(forResource: "vocab", withExtension: "json") else { return nil }
         do {
             // A tuned file from an earlier shipped model is dropped; the entries are relearned.
-            store.discardTunedWeightsUnlessMatching(try GraphScorer.Weights(path: weightsPath))
+            store.discardTunedWeightsUnlessMatching(try weightsSource.load())
             guard store.hasTunedWeights else { return nil }
-            return try tunedCoreMLScorer(vocabulary: vocabulary) ?? GraphScorer(weightsPath: weightsPath, tunedPath: store.tunedBase, vocabularyURL: vocabulary)
+            return try tunedCoreMLScorer(vocabulary: vocabulary) ?? GraphScorer(source: weightsSource, tunedPath: store.tunedBase, vocabularyURL: vocabulary)
         } catch {
             NSLog("Typing: cannot load the tuned model: \(error)")
             return nil
@@ -99,9 +103,9 @@ enum Learning {
     }
 
     private static func makeLearner() -> Learner? {
-        guard let weightsPath, let vocabulary = Bundle.main.url(forResource: "vocab", withExtension: "json"), let decoder = EngineHost.lexiconDecoder else { return nil }
+        guard let weightsSource, let vocabulary = Bundle.main.url(forResource: "vocab", withExtension: "json"), let decoder = EngineHost.lexiconDecoder else { return nil }
         let general = Bundle.main.url(forResource: "general_lattices", withExtension: "tsv")
-        let learner = try? Learner(store: store, weightsPath: weightsPath, vocabularyURL: vocabulary, generalLatticesURL: general) { keys, context in
+        let learner = try? Learner(store: store, weights: weightsSource, vocabularyURL: vocabulary, generalLatticesURL: general) { keys, context in
             // The lattice's own order and typing costs; the model's look is deferred and not taken here.
             let quick = decoder.decode(keys, precedingText: context)
             return quick.sentences.map { (text: $0.text, score: $0.score, penalty: $0.penalty) }

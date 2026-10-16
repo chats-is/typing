@@ -12,4 +12,4 @@ else
     echo "no checksum file beside the archive; unpacking unverified" >&2
 fi
 tar --zstd -xf "$ARCHIVE"
-ls -la Resources/lexicon.sqlite Resources/bigram.bin Resources/weights.bin Resources/LanguageModel.mlmodelc/weights/weight.bin
+ls -la Resources/lexicon.sqlite Resources/bigram.bin Resources/positions.bin Resources/LanguageModel.mlmodelc/weights/weight.bin

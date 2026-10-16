@@ -29,7 +29,8 @@ else
     exit 1
 fi
 if [ -f Resources/bigram.bin ]; then cp Resources/bigram.bin "$APP/Contents/Resources/"; fi
-# Learning on this machine: the plain weights the GPU runtime loads, and the general check set.
-for f in Resources/weights.bin Resources/weights.json Resources/general_lattices.tsv Resources/general_words.tsv; do [ -f "$f" ] && cp "$f" "$APP/Contents/Resources/"; done
+# Learning on this machine: the model's header and full position table (the weights themselves are
+# read out of the Core ML model), and the general check sets.
+for f in Resources/weights.json Resources/positions.bin Resources/general_lattices.tsv Resources/general_words.tsv; do [ -f "$f" ] && cp "$f" "$APP/Contents/Resources/"; done
 codesign --force --sign - --entitlements Bundle/Typing.entitlements "$APP"
 echo "built $APP"

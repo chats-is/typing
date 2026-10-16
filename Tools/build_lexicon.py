@@ -10,8 +10,8 @@ but rarely written word (退格) still beats a nickname (推哥). Single charact
 reading, weighted by the readings table. English words carry their usual casing (iphone -> iPhone).
 
 Tables:
-  lexicon(key, n, wid, word, logp, abbr, lm0)  key: syllables joined by "'"; n: syllable count;
-                                               abbr: first letters; lm0: filled in by Tools/add_lm0.py
+  lexicon(key, n, wid, word, logp, abbr)       key: syllables joined by "'"; n: syllable count;
+                                               abbr: first letters
   syllables(s)                                 every full syllable
   english(key, word, logp)                     key: the lowercase word; word: as it is written
 """
@@ -31,7 +31,6 @@ ENGLISH = os.path.join(LEXICONS, "english", "en_50k.txt")
 CASING = os.path.join(ROOT, "Data", "lexicon", "english_casing.tsv")  # Tools/make_english_casing.py
 OUT = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
 VOCAB = os.path.join(ROOT, "Data", "lm9", "vocab.json")  # the language model's characters
-LM0 = os.path.join(ROOT, "Data", "lexicon", "lm0.tsv")
 
 MAX_SYLLABLES = 8
 # Occurrences per million characters a word is credited with for being listed by this many lexicons.
@@ -152,22 +151,14 @@ def main():
             english[lower] = (lower, ENGLISH_FLOOR * (1 - count / ENGLISH_WORDS))
     print(f"{len(english):,} English words")
 
-    # The language model's no-context score per word, computed once by Tools/add_lm0.py and cached.
-    lm0 = {}
-    if os.path.exists(LM0):
-        with open(LM0, encoding="utf-8") as f:
-            for line in f:
-                word, value = line.rstrip("\n").split("\t")[:2]
-                lm0[word] = float(value)
-    print(f"{len(lm0):,} cached lm0 values")
 
     total = sum(entries.values()) + sum(rate for _, rate in english.values())
-    english_rows = [(lower, usual, math.log(rate / total), lm0.get(usual, 0.0)) for lower, (usual, rate) in english.items()]
+    english_rows = [(lower, usual, math.log(rate / total)) for lower, (usual, rate) in english.items()]
     wids = {}
     for _key, word in sorted(entries):
         wids.setdefault(word, len(wids) + 1)
     rows = sorted(
-        ((key, key.count("'") + 1, wids[word], word, math.log(rate / total), "".join(s[0] for s in key.split("'")), lm0.get(word, 0.0)) for (key, word), rate in entries.items()),
+        ((key, key.count("'") + 1, wids[word], word, math.log(rate / total), "".join(s[0] for s in key.split("'"))) for (key, word), rate in entries.items()),
         key=lambda r: (r[0], -r[4]),
     )
     syllables = sorted({s for key, _ in entries for s in key.split("'")})
@@ -176,17 +167,15 @@ def main():
     if os.path.exists(OUT):
         os.remove(OUT)
     db = sqlite3.connect(OUT)
-    db.execute("CREATE TABLE lexicon(key TEXT NOT NULL, n INTEGER NOT NULL, wid INTEGER NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL, abbr TEXT NOT NULL, lm0 REAL NOT NULL)")
+    db.execute("CREATE TABLE lexicon(key TEXT NOT NULL, n INTEGER NOT NULL, wid INTEGER NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL, abbr TEXT NOT NULL)")
     db.execute("CREATE TABLE syllables(s TEXT PRIMARY KEY) WITHOUT ROWID")
-    db.execute("CREATE TABLE english(key TEXT NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL, lm0 REAL NOT NULL DEFAULT 0)")
-    db.executemany("INSERT INTO lexicon VALUES (?,?,?,?,?,?,?)", rows)
+    db.execute("CREATE TABLE english(key TEXT NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL)")
+    db.executemany("INSERT INTO lexicon VALUES (?,?,?,?,?,?)", rows)
     db.executemany("INSERT INTO syllables VALUES (?)", ((s,) for s in syllables))
-    db.executemany("INSERT INTO english VALUES (?,?,?,?)", english_rows)
+    db.executemany("INSERT INTO english VALUES (?,?,?)", english_rows)
     db.execute("CREATE INDEX idx_key ON lexicon(key, logp DESC)")
     db.execute("CREATE INDEX idx_n_key ON lexicon(n, key)")
     db.execute("CREATE INDEX idx_abbr ON lexicon(abbr, logp DESC) WHERE n >= 2")
-    db.execute("CREATE INDEX idx_word ON lexicon(word, logp DESC)")
-    db.execute("CREATE INDEX idx_wid ON lexicon(wid)")
     db.execute("CREATE INDEX idx_english ON english(key, logp DESC)")
     db.commit()
     db.execute("VACUUM")
