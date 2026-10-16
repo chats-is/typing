@@ -119,6 +119,16 @@ def write(keys, counts, min_count, out):
     print(f"wrote {out}: {len(keys):,} bigrams (count >= {min_count}), {os.path.getsize(out) / 1e6:.0f} MB")
 
 
+def load_words():
+    """Fills WORDS (word → (wid, log p)) with the lexicon's Chinese words of up to MAX_WORD_CHARS."""
+    db = sqlite3.connect(LEXICON)
+    for word, wid, logp in db.execute("SELECT word, wid, MAX(logp) FROM lexicon GROUP BY word"):
+        if len(word) <= MAX_WORD_CHARS and all("一" <= c <= "鿿" for c in word):
+            WORDS[word] = (wid, logp)
+    db.close()
+    return WORDS
+
+
 def main():
     global TEXT
     parser = argparse.ArgumentParser()
@@ -131,11 +141,7 @@ def main():
         write(cached["keys"], cached["counts"], args.min_count, args.out)
         return
     started = time.time()
-    db = sqlite3.connect(LEXICON)
-    for word, wid, logp in db.execute("SELECT word, wid, MAX(logp) FROM lexicon GROUP BY word"):
-        if len(word) <= MAX_WORD_CHARS and all("一" <= c <= "鿿" for c in word):
-            WORDS[word] = (wid, logp)
-    db.close()
+    load_words()
     print(f"{len(WORDS):,} words ({time.time() - started:.0f}s)", flush=True)
     with open(os.path.join(DATA, "vocab.json"), encoding="utf-8") as f:
         vocab = json.load(f)

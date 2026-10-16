@@ -3,8 +3,11 @@
 
 Each line is "pin yin<TAB>sentence<TAB>preceding text" (up to 60 characters, line breaks as
 spaces). It measures what the input method is for: picking the right homophone given what was
-already written. Run with the project venv, from the Tools directory.
+already written. Documents come from Data/holdout (blank-line separated, never trained on).
+
+    Data/venv-train/bin/python Tools/make_context_eval.py
 """
+import glob
 import os
 import random
 import sqlite3
@@ -21,8 +24,9 @@ CONTEXT_CHARS = 60
 
 def main():
     holdout = []
-    for _ in build_bigram.batches(holdout):
-        pass
+    for path in sorted(glob.glob(os.path.join(ROOT, "Data", "holdout", "holdout_*.txt"))):
+        with open(path, encoding="utf-8") as f:
+            holdout += [doc for doc in f.read().split("\n\n") if doc.strip()]
     db = sqlite3.connect(build_bigram.LEXICON)
     syllables = {row[0] for row in db.execute("SELECT s FROM syllables")}
     db.close()
