@@ -19,7 +19,7 @@ cat > "$STAGE/安装说明.txt" <<'NOTE'
 想一步装好并自动启用，用发布页上的 .pkg 安装包。
 
 本版本为本机临时签名，首次打开若被系统拦下，到 系统设置 › 隐私与安全性 里选择“仍要打开”。
-卸载：删除 /Library/Input Methods/Typing.app。
+卸载：删除 /Library/Input Methods/Typing.app，并在 系统设置 › 键盘 › 输入法 里移除“智能输入”。
 NOTE
 rm -f "$OUT/Typing-$VERSION.dmg"
 hdiutil create -volname "Typing $VERSION" -srcfolder "$STAGE" -ov -format UDZO -quiet "$OUT/Typing-$VERSION.dmg"

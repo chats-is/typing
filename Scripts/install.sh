@@ -7,12 +7,21 @@ cd "$(dirname "$0")/.."
 Scripts/build.sh
 
 DEST="/Library/Input Methods/Typing.app"
-# Stop the running copy so the system relaunches the new build.
+# Put the new build in place with two renames, then stop the running copy once. The system may
+# relaunch the input method the moment it dies; copying over the old files after the kill would
+# give that relaunch half-replaced files (it keeps the lexicon open, and typing breaks).
+sudo rm -rf "$DEST.new" "$DEST.old"
+sudo cp -R build/Typing.app "$DEST.new"
+[ -d "$DEST" ] && sudo mv "$DEST" "$DEST.old"
+sudo mv "$DEST.new" "$DEST"
 pkill -x Typing 2>/dev/null || true
-sudo rm -rf "$DEST"
-sudo cp -R build/Typing.app "$DEST"
+sudo rm -rf "$DEST.old"
 # A copy from the old per-user install would show up as a second "智能输入".
 rm -rf "$HOME/Library/Input Methods/Typing.app"
+# Launch Services must know exactly one app for the bundle id: the system launches the input method
+# by bundle id, and with build/Typing.app also registered the launch fails (LaunchInputMethod -50) and
+# nothing can be typed. Unregister the build copy.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$PWD/build/Typing.app" >/dev/null 2>&1 || true
 
 swiftc -O Tools/register.swift -o build/tools/register
 if build/tools/register "$DEST"; then

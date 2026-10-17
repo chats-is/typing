@@ -15,7 +15,7 @@ Engine/     引擎：词库（SQLite）、二元模型、音节匹配、格子�
 Resources/  装进 App 的资源：lexicon.sqlite、bigram.bin、LanguageModel.mlmodelc、positions.bin、weights.json、vocab.json、
             general_lattices.tsv、general_words.tsv（大文件不在仓库里，见下）
 Bundle/     Info.plist、entitlements、本地化
-Scripts/    build.sh install.sh gate.sh symtest.sh build_model.sh
+Scripts/    build.sh install.sh uninstall.sh gate.sh symtest.sh build_model.sh
 Tools/      开发工具：enginecli（评测与模拟）、symtest（按键测试）、syspinyin（系统拼音对照）、
             词库与评测集的生成脚本（Python）
 Training/   语言模型的数据准备、训练、导出（PyTorch → Core ML / fp16 权重）
@@ -29,6 +29,7 @@ docs/       架构、开发流程、决策记录、基准数字
 
 ```sh
 Scripts/install.sh      # swift build → build/Typing.app → /Library/Input Methods（要一次管理员密码），并登记
+Scripts/uninstall.sh    # 停用、停进程、删除 /Library/Input Methods/Typing.app、清安装收据；加 --data 连学习数据一起删
 ```
 
 `Resources/` 里的三个大文件（lexicon.sqlite 109 MB、bigram.bin 98 MB、LanguageModel.mlmodelc 57 MB）用 Git LFS 存放：装了 `git-lfs`（`brew install git-lfs && git lfs install`）再 clone 就能直接构建。没有 LFS 的环境可以用发布包：`Scripts/package_resources.sh` 打包带校验和的归档，`Scripts/fetch_resources.sh <归档>` 解到 `Resources/`。也可以按 `docs/development.md` 用工具链重新生成。`Scripts/build.sh` 在缺文件时会报错指出。
