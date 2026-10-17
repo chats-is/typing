@@ -11,6 +11,12 @@ Data/*
 !Data/eval_word_mixed.tsv
 !Data/eval_word_initials.tsv
 !Data/eval_word_english.tsv
+# The sentence sets the release gate runs (Scripts/gate.sh).
+!Data/eval_dialogue.tsv
+!Data/eval_news.tsv
+!Data/eval_forum.tsv
+!Data/eval_touchpal.tsv
+!Data/eval_short.tsv
 !Data/eval.tsv
 !Data/personal/
 Data/personal/*

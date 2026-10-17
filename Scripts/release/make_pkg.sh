@@ -6,7 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 VERSION="${1:?usage: make_pkg.sh <version> [out dir]}"
 OUT="${2:-dist}"
-[ -d build/Typing.app ] || Scripts/build.sh
+# Always build: a stale build/Typing.app would ship an older Info.plist (version) or binary.
+Scripts/build.sh
 STAGE="$(mktemp -d)"
 mkdir -p "$STAGE/root/Library/Input Methods" "$STAGE/scripts" "$OUT"
 cp -R build/Typing.app "$STAGE/root/Library/Input Methods/"
@@ -24,7 +25,13 @@ cat > "$STAGE/scripts/postinstall" <<'POST'
 # Register and enable the input method for the person who is logged in (the installer runs as root).
 APP="/Library/Input Methods/Typing.app"
 USER_NAME="$(stat -f%Su /dev/console)"
-pkill -x Typing 2>/dev/null || true
+# A copy the system relaunched while the payload was being written still holds the old files:
+# stop it (only that one; the launch agent counts every exit, so no needless kills).
+INSTALLED_AT="$(stat -f%m "$APP/Contents/MacOS/Typing" 2>/dev/null || echo 0)"
+for PID in $(pgrep -x Typing); do
+    STARTED="$(LC_ALL=C ps -o lstart= -p "$PID" | xargs -I{} env LC_ALL=C date -j -f '%a %b %d %T %Y' '{}' +%s 2>/dev/null || echo 0)"
+    [ "$STARTED" -lt "$INSTALLED_AT" ] && kill "$PID" 2>/dev/null || true
+done
 if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ]; then
     USER_ID="$(id -u "$USER_NAME")"
     USER_HOME="$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
