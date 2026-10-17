@@ -20,5 +20,7 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 "$LSREGISTER" -f -R "$DEST" >/dev/null 2>&1 || true
 
 swiftc -O Tools/register.swift -o build/tools/register
-build/tools/register "$DEST"
+# On macOS 27 the first install of a bundle id ends here with the Settings pane open: the person
+# turns the input method on under 登录项与扩展 › 扩展 › 输入方式, then adds it under 键盘 › 输入法.
+build/tools/register "$DEST" || true
 echo "installed $DEST"
