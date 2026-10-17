@@ -28,8 +28,7 @@ docs/       架构、开发流程、决策记录、基准数字
 需要 macOS 15 以上、Xcode 命令行工具。
 
 ```sh
-Scripts/install.sh      # swift build → build/Typing.app → ~/Library/Input Methods，并启用
-# macOS 27：首次安装后在 系统设置 › 通用 › 登录项与扩展 › 扩展 › 输入方式 打开“智能输入”，再到 键盘 › 输入法 添加
+Scripts/install.sh      # swift build → build/Typing.app → /Library/Input Methods（要一次管理员密码），并登记
 ```
 
 `Resources/` 里的三个大文件（lexicon.sqlite 109 MB、bigram.bin 98 MB、LanguageModel.mlmodelc 57 MB）用 Git LFS 存放：装了 `git-lfs`（`brew install git-lfs && git lfs install`）再 clone 就能直接构建。没有 LFS 的环境可以用发布包：`Scripts/package_resources.sh` 打包带校验和的归档，`Scripts/fetch_resources.sh <归档>` 解到 `Resources/`。也可以按 `docs/development.md` 用工具链重新生成。`Scripts/build.sh` 在缺文件时会报错指出。

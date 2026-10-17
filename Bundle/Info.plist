@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>is.chats.typing</string>
+	<string>is.chats.inputmethod.Typing</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -21,15 +21,15 @@
 	<key>CFBundleVersion</key>
 	<string>7</string>
 	<key>InputMethodConnectionName</key>
-	<string>is.chats.typing_Connection</string>
+	<string>is_chats_inputmethod_Typing_Connection</string>
 	<key>InputMethodServerControllerClass</key>
 	<string>TypingInputController</string>
 	<key>InputMethodServerDelegateClass</key>
 	<string>TypingInputController</string>
+	<key>LSBackgroundOnly</key>
+	<true/>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
-	<key>LSUIElement</key>
-	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>TISIconIsTemplate</key>
@@ -40,7 +40,7 @@
 		<string>智</string>
 	</dict>
 	<key>TISInputSourceID</key>
-	<string>is.chats.typing</string>
+	<string>is.chats.inputmethod.Typing</string>
 	<key>TISIntendedLanguage</key>
 	<string>zh-Hans</string>
 	<key>tsInputMethodCharacterRepertoireKey</key>

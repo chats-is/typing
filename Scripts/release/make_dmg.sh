@@ -15,12 +15,11 @@ cat > "$STAGE/安装说明.txt" <<'NOTE'
 智能输入 安装
 
 把 Typing.app 拖到旁边的 Input Methods 文件夹里（系统会要求管理员密码），
-然后到 系统设置 › 通用 › 登录项与扩展 › 扩展 › 输入方式 打开“智能输入”，
-再到 系统设置 › 键盘 › 输入法 添加“智能输入”（macOS 27 起第三方输入法要先在扩展里打开；没看到就注销后重新登录）。
+然后到 系统设置 › 键盘 › 输入法 添加“智能输入”，或注销后重新登录。
 想一步装好并自动启用，用发布页上的 .pkg 安装包。
 
 本版本为本机临时签名，首次打开若被系统拦下，到 系统设置 › 隐私与安全性 里选择“仍要打开”。
-卸载：删除 /Library/Input Methods/Typing.app（或 ~/Library/Input Methods/Typing.app）。
+卸载：删除 /Library/Input Methods/Typing.app。
 NOTE
 rm -f "$OUT/Typing-$VERSION.dmg"
 hdiutil create -volname "Typing $VERSION" -srcfolder "$STAGE" -ov -format UDZO -quiet "$OUT/Typing-$VERSION.dmg"

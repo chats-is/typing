@@ -1,4 +1,4 @@
 /* Names shown in the input menu and in Keyboard settings. */
 CFBundleName = "Typing";
 CFBundleDisplayName = "Typing";
-"is.chats.typing" = "Typing";
+"is.chats.inputmethod.Typing" = "Typing";

@@ -2,7 +2,7 @@
 
 三条主线：输入、学习、设置。其余都是开发工具。
 
-输入法叫“智能输入”（bundle `is.chats.typing`）。系统里只有这一项，输入源编号就是 `is.chats.typing`：`Info.plist` 不声明输入模式（没有 `ComponentInputModeDict`），图标、语言、字符集都写在顶层键里。拼音和将来的 AI 语音都是这一个输入法里的功能，不加输入模式，而是在同一个控制器里按快捷键或菜单启动，共用设置窗口与学习目录。
+输入法叫“智能输入”（bundle `is.chats.inputmethod.Typing`）。系统里只有这一项，输入源编号就是 `is.chats.inputmethod.Typing`：`Info.plist` 不声明输入模式（没有 `ComponentInputModeDict`），图标、语言、字符集都写在顶层键里。拼音和将来的 AI 语音都是这一个输入法里的功能，不加输入模式，而是在同一个控制器里按快捷键或菜单启动，共用设置窗口与学习目录。
 
 ## 输入
 

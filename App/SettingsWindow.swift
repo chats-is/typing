@@ -20,8 +20,16 @@ enum SettingsWindow {
             window.setFrameAutosaveName("SettingsWindow")
             window.center()
             Self.window = window
+            // Back to a pure background process once the window closes, so the input method never
+            // competes with the app being typed in for the foreground.
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+                NSApp.setActivationPolicy(.prohibited)
+            }
         }
         LearningStatus.shared.refresh()
+        // A background-only app (LSBackgroundOnly, as input methods must be) cannot come forward until it
+        // takes the accessory activation policy; without this the settings window opens behind.
+        NSApp.setActivationPolicy(.accessory)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
