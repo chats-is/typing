@@ -323,7 +323,7 @@ if let learnDemo, let lexiconEngine, let graphWeightsPath {
             print("  \(probe) -> " + result.candidates.prefix(5).map(\.text).joined(separator: " "))
         }
     }
-    print(String(format: "session: %@ (%@) steps %d  personal %.2f -> %.2f (n=%d)  general %.2f -> %.2f (n=%d)  words %.2f -> %.2f (n=%d)  %.0f s", outcome.accepted ? "KEPT" : "DISCARDED", outcome.reason, outcome.steps, outcome.personalBefore, outcome.personalAfter, outcome.personalCount, outcome.generalBefore, outcome.generalAfter, outcome.generalCount, outcome.wordsBefore, outcome.wordsAfter, outcome.wordsCount, outcome.seconds))
+    print(String(format: "session: %@ (%@) steps %d  personal %.2f -> %.2f (n=%d)  general %.2f -> %.2f (n=%d)  words %.2f -> %.2f (n=%d)  typed reversed %d (n=%d)  %.0f s", outcome.accepted ? "KEPT" : "DISCARDED", outcome.reason, outcome.steps, outcome.personalBefore, outcome.personalAfter, outcome.personalCount, outcome.generalBefore, outcome.generalAfter, outcome.generalCount, outcome.wordsBefore, outcome.wordsAfter, outcome.wordsCount, outcome.typedReversed, outcome.typedCount, outcome.seconds))
     exit(0)
 }
 

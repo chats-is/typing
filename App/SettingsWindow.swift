@@ -2,419 +2,135 @@ import Cocoa
 import Engine
 import SwiftUI
 
-/// The settings window: the standard macOS settings shell. A split view whose sidebar item gets the
-/// system's translucent sidebar material, a unified toolbar so the title sits over the content column,
-/// and the selected page's name as the window title. The pages themselves are SwiftUI forms.
+/// The settings window: one page. Shortcuts, learning (switch, status, actions), the learning
+/// data in two tabs with search and pages, and the about card at the end.
 enum SettingsWindow {
     private static var controller: SettingsWindowController?
 
-    static func show(page: SettingsPage? = nil) {
+    static func show() {
         if controller == nil { controller = SettingsWindowController() }
-        if let page { controller?.select(page) }
         LearningStatus.shared.refresh()
         // A background-only app (LSBackgroundOnly, as input methods must be) cannot come forward until it
         // takes the accessory activation policy; without this the settings window opens behind.
         NSApp.setActivationPolicy(.accessory)
         controller?.showWindow(nil)
         controller?.window?.orderFrontRegardless()
+        // Deprecated since macOS 14 (the compiler warns), but only this brings the window of a
+        // background input method in front of the app being typed in: NSApp.activate() is cooperative
+        // and the window stays behind (tested in the installed input method, 0.2.3).
         NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
         controller?.window?.makeKeyAndOrderFront(nil)
+        // Nothing focused on opening: AppKit would otherwise put the cursor in the search field.
+        DispatchQueue.main.async { controller?.window?.makeFirstResponder(nil) }
     }
 }
 
-final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
-    private let split = SettingsSplitViewController()
-
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     init() {
-        let window = NSWindow(contentViewController: split)
+        let host = NSHostingController(rootView: SettingsRootView())
+        host.sizingOptions = []
+        let window = NSWindow(contentViewController: host)
+        window.title = "智能输入法"
+        // The system's own title bar, drawn by each macOS in its style; the page scrolls under it.
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-        window.toolbarStyle = .unified
-        window.titlebarSeparatorStyle = .none
-        // No title bar material: the content column is one flat surface, as in System Settings.
-        window.titlebarAppearsTransparent = true
-        window.backgroundColor = .windowBackgroundColor
-        window.setContentSize(NSSize(width: 740, height: 611))
-        window.minSize = NSSize(width: 700, height: 520)
+        window.setContentSize(NSSize(width: 640, height: 680))
+        window.minSize = NSSize(width: 560, height: 480)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-        let toolbar = NSToolbar(identifier: "SettingsToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        window.toolbar = toolbar
-        window.setFrameAutosaveName("SettingsWindow")
+        window.setFrameAutosaveName("Settings")
         window.center()
-        split.onSelect = { [weak self] page in self?.window?.title = page.title }
-        split.select(.general)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func select(_ page: SettingsPage) { split.select(page) }
+    /// Coming back to the window (after typing elsewhere) shows what has been recorded since.
+    func windowDidBecomeKey(_ notification: Notification) { LearningStatus.shared.refresh() }
 
     /// Back to a pure background process once the window closes, so the input method never
     /// competes with the app being typed in for the foreground.
     func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.prohibited) }
-
-    // The toolbar only carries the sidebar toggle and the separator that tracks the sidebar edge,
-    // which is what moves the title over the content column.
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace]
-    }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar)
-    }
-    // Required by the protocol; the system builds its own standard items, so nothing to supply.
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? { nil }
 }
 
-/// Sidebar on the left, the selected page on the right.
-final class SettingsSplitViewController: NSSplitViewController {
-    var onSelect: ((SettingsPage) -> Void)?
-    private let sidebar = SettingsSidebarController()
-    private let content = NSViewController()
-    private var page: NSViewController?
+// MARK: - Learning data
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        let background = OpaqueBackgroundView()
-        content.view = background
-        let side = NSSplitViewItem(sidebarWithViewController: sidebar)
-        side.minimumThickness = 200
-        side.maximumThickness = 300
-        side.preferredThicknessFraction = 0.31
-        side.canCollapse = false
-        addSplitViewItem(side)
-        addSplitViewItem(NSSplitViewItem(viewController: content))
-        sidebar.onSelect = { [weak self] page in self?.select(page) }
-    }
-
-    func select(_ selected: SettingsPage) {
-        loadViewIfNeeded()
-        page?.view.removeFromSuperview()
-        page?.removeFromParent()
-        let host: NSViewController
-        switch selected {
-        case .general: host = NSHostingController(rootView: GeneralSettingsView())
-        case .learning: host = NSHostingController(rootView: LearningSettingsView())
-        case .about: host = NSHostingController(rootView: AboutSettingsView())
-        }
-        content.addChild(host)
-        host.view.translatesAutoresizingMaskIntoConstraints = false
-        content.view.addSubview(host.view)
-        NSLayoutConstraint.activate([
-            host.view.leadingAnchor.constraint(equalTo: content.view.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: content.view.trailingAnchor),
-            host.view.topAnchor.constraint(equalTo: content.view.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: content.view.bottomAnchor),
-        ])
-        page = host
-        sidebar.highlight(selected)
-        onSelect?(selected)
-    }
-}
-
-/// A flat, opaque window-coloured surface. Being opaque keeps SwiftUI from treating what sits on it as
-/// vibrant (which turns the grouped form's white cards into translucent grey ones).
-final class OpaqueBackgroundView: NSView {
-    override var isOpaque: Bool { true }
-    override var allowsVibrancy: Bool { false }
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
-        dirtyRect.fill()
-    }
-}
-
-/// The sidebar: a source list with one row per page.
-final class SettingsSidebarController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
-    var onSelect: ((SettingsPage) -> Void)?
-    private let table = NSTableView()
-    private let pages = SettingsPage.allCases
-
-    override func loadView() {
-        let scroll = NSScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.documentView = table
-        table.style = .sourceList
-        table.headerView = nil
-        table.backgroundColor = .clear
-        table.rowHeight = 34
-        table.selectionHighlightStyle = .sourceList
-        table.allowsEmptySelection = false
-        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("page")))
-        table.dataSource = self
-        table.delegate = self
-        view = scroll
-    }
-
-    func highlight(_ page: SettingsPage) {
-        guard let row = pages.firstIndex(of: page), table.selectedRow != row else { return }
-        table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int { pages.count }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let page = pages[row]
-        let cell = NSTableCellView()
-        // The icon as System Settings draws it: a white symbol on a coloured rounded tile.
-        let tile = NSView()
-        tile.wantsLayer = true
-        tile.layer?.backgroundColor = page.tint.cgColor
-        tile.layer?.cornerRadius = 6
-        let icon = NSImageView(image: NSImage(systemSymbolName: page.symbol, accessibilityDescription: page.title) ?? NSImage())
-        icon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
-        icon.contentTintColor = .white
-        let text = NSTextField(labelWithString: page.title)
-        text.font = .systemFont(ofSize: 13)
-        text.lineBreakMode = .byTruncatingTail
-        cell.imageView = icon
-        cell.textField = text
-        for subview in [tile, icon, text] { subview.translatesAutoresizingMaskIntoConstraints = false }
-        cell.addSubview(tile)
-        cell.addSubview(icon)
-        cell.addSubview(text)
-        NSLayoutConstraint.activate([
-            tile.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            tile.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            tile.widthAnchor.constraint(equalToConstant: 24),
-            tile.heightAnchor.constraint(equalToConstant: 24),
-            icon.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
-            icon.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
-            text.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 8),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
-        return cell
-    }
-
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        guard table.selectedRow >= 0 else { return }
-        onSelect?(pages[table.selectedRow])
-    }
-}
-
-/// What the learning section shows: the status line, the changes learning made and the material it
-/// learned from; refreshed when the window opens or after a correction.
+/// What the learning cards show; refreshed when the window opens, after an action, after a session.
 final class LearningStatus: ObservableObject {
     static let shared = LearningStatus()
     struct Change: Identifiable { let id: String; let keys: String; let learned: String; let general: String }
-    struct Record: Identifiable { let id: Double; let keys: String; let text: String }
+    /// One input: keys and text, typed `count` times (the store keeps it once).
+    struct Record: Identifiable { let id: String; let keys: String; let text: String; let count: Int; let time: Double }
+    enum Tab: Int, CaseIterable, Identifiable { case changes, records; var id: Int { rawValue }; var title: String { self == .changes ? "改变的首选词" : "训练用的输入" } }
+
     @Published var text = Learning.statusText()
     @Published var changes: [Change] = []
     @Published var records: [Record] = []
-    @Published var loading = false
+    @Published var loadingChanges = false
+    @Published var loadingRecords = false
+    private var recordsGeneration = 0
+    @Published var training = Learning.isRunning
+    @Published var tab: Tab = .changes { didSet { page = 0 } }
+    @Published var query = "" { didSet { page = 0 } }
+    @Published var page = 0
+    /// The tag under the pointer, whose × shows fully.
     @Published var hovered: String?
+    /// Small enough that the page needs no scrolling at the window's default height.
+    static let pageSize = 30
+
+    init() {
+        Learning.sessionEnded = { [weak self] in self?.training = false; self?.refresh() }
+    }
 
     func refresh() {
         text = Learning.statusText()
-        records = Learning.store.entries().suffix(200).reversed().map { Record(id: $0.time, keys: $0.keys, text: $0.text) }
-        loading = true
+        loadingRecords = true
+        recordsGeneration += 1
+        let generation = recordsGeneration
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = Learning.store.entries().reversed().map {
+                Record(id: "\($0.time)", keys: $0.keys, text: $0.text, count: $0.count, time: $0.time)
+            }
+            DispatchQueue.main.async {
+                guard generation == self.recordsGeneration else { return }  // a newer load is under way
+                self.records = found
+                self.loadingRecords = false
+                self.clampPage()
+            }
+        }
+        loadingChanges = true
         Learning.requestLearnedChanges { found in
             self.changes = found.map { Change(id: $0.keys, keys: $0.keys, learned: $0.learned, general: $0.general) }
-            self.loading = false
+            self.loadingChanges = false
+            self.clampPage()
         }
+    }
+
+    /// After a deletion the last page may be gone: show the last one there is.
+    private func clampPage() { page = min(page, pageCount - 1) }
+
+    /// The current tab's rows after the search box, and the page of them on show.
+    var filteredChanges: [Change] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? changes : changes.filter { [$0.keys, $0.learned, $0.general].contains { $0.localizedCaseInsensitiveContains(q) } }
+    }
+    var filteredRecords: [Record] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? records : records.filter { $0.keys.localizedCaseInsensitiveContains(q) || $0.text.localizedCaseInsensitiveContains(q) }
+    }
+    var filteredCount: Int { tab == .changes ? filteredChanges.count : filteredRecords.count }
+    /// The current tab's data is being read.
+    var loading: Bool { tab == .changes ? loadingChanges : loadingRecords }
+    var pageCount: Int { max(1, (filteredCount + Self.pageSize - 1) / Self.pageSize) }
+    func pageRange(_ count: Int) -> Range<Int> {
+        let start = min(page * Self.pageSize, max(0, count))
+        return start ..< min(start + Self.pageSize, count)
     }
 }
 
-enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, learning, about
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .general: return "通用"
-        case .learning: return "学习"
-        case .about: return "关于"
-        }
-    }
-    var symbol: String {
-        switch self {
-        case .general: return "keyboard"
-        case .learning: return "brain.head.profile"
-        case .about: return "info.circle"
-        }
-    }
-    /// The tile colour behind the symbol in the sidebar, as System Settings colours its icons.
-    var tint: NSColor {
-        switch self {
-        case .general: return .systemBlue
-        case .learning: return .systemPurple
-        case .about: return .systemGray
-        }
-    }
-}
+// MARK: - The page
 
-/// The look of System Settings' panes: a page of groups, each a white card with rows separated by
-/// hairlines, a bold title above and a caption below. (SwiftUI's grouped Form draws translucent grey
-/// cards in this window, so the cards are drawn here.)
-struct SettingsGroup<Content: View>: View {
-    let title: String
-    var footer: String? = nil
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 15, weight: .semibold)).padding(.horizontal, 4)
-            VStack(alignment: .leading, spacing: 0) { content }
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
-            if let footer {
-                Text(footer).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
-            }
-        }
-    }
-}
-
-/// One row inside a group: standard inset, a hairline above it unless it is the first.
-struct SettingsRow<Content: View>: View {
-    var first = false
-    @ViewBuilder let content: Content
-    var body: some View {
-        VStack(spacing: 0) {
-            if !first { Divider().padding(.leading, 16) }
-            HStack(spacing: 8) { content }
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .frame(minHeight: 44)
-        }
-    }
-}
-
-/// A page: its groups stacked in a scroll view with System Settings' margins.
-struct SettingsScroll<Content: View>: View {
-    @ViewBuilder let content: Content
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) { content }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
-        }
-    }
-}
-
-/// Basic settings: keys. More (candidates per page, font size) belong here as they come.
-struct GeneralSettingsView: View {
-    var body: some View {
-        SettingsScroll {
-            ShortcutsSection()
-        }
-    }
-}
-
-/// About: what this is, which version, what it does with your text, where the code lives.
-struct AboutSettingsView: View {
-    private var version: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
-        let build = info?["CFBundleVersion"] as? String ?? "—"
-        return "\(short)（\(build)）"
-    }
-    private static let learningFolder = "~/Library/Containers/is.chats.inputmethod.Typing"
-
-    var body: some View {
-        SettingsScroll {
-            SettingsGroup(title: "智能输入") {
-                SettingsRow(first: true) {
-                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("智能输入").font(.system(size: 15, weight: .semibold))
-                        Text("macOS 拼音输入法").font(.callout).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text("版本 \(version)").font(.callout).foregroundStyle(.secondary)
-                }
-                SettingsRow {
-                    Text("词库决定能打出什么，语言模型按上下文给候选排序；全拼、简拼、带错的拼法都能打，整句一次上屏。")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-            }
-            SettingsGroup(title: "你的数据", footer: "删除输入法后，这个文件夹不会自动删除；不需要时可以一并删除。") {
-                SettingsRow(first: true) {
-                    Text("不联网").frame(width: 96, alignment: .leading)
-                    Text("输入法运行在沙盒里，没有网络权限，你输入的任何内容都不会离开这台电脑。").font(.callout).foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                SettingsRow {
-                    Text("学习数据").frame(width: 96, alignment: .leading)
-                    Text("学习记录和学到的参数只保存在 \(Self.learningFolder)，可以在“学习”页逐条删除或整体重置。").font(.callout).foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-            }
-            SettingsGroup(title: "开源") {
-                SettingsRow(first: true) {
-                    Text("源代码、词库和模型的构建方法都在 GitHub 上。").font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("打开项目主页") {
-                        if let url = URL(string: "https://github.com/chats-is/typing") { NSWorkspace.shared.open(url) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Learning: the switch and status, what learning changed, what it learned from.
-struct LearningSettingsView: View {
-    @AppStorage("LearningEnabled") private var learningEnabled = true
-    @ObservedObject private var status = LearningStatus.shared
-
-    var body: some View {
-        SettingsScroll {
-            SettingsGroup(title: "学习", footer: "学习只在这台电脑上，用你确认过的文字微调语言模型的最上两层；每次学习后都用你最近的输入和一组大众句子检验，变差就回滚。关闭后立即恢复出厂模型；重置会删除学习记录和学到的参数。") {
-                SettingsRow(first: true) {
-                    Toggle("学习我的输入习惯", isOn: $learningEnabled)
-                        .toggleStyle(.switch)
-                        .onChange(of: learningEnabled) { _, _ in Learning.enabledChanged(); status.refresh() }
-                }
-                SettingsRow {
-                    Text(status.text).font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("重置学习") { Learning.reset(); status.refresh() }
-                }
-            }
-            SettingsGroup(title: "学到的变化", footer: "首选已和大众顺序不同的输入。移到标签上点 × 撤销：这个词恢复大众顺序，以后的学习也不再改变它。") {
-                SettingsRow(first: true) {
-                    if status.loading {
-                        Text("正在对照…").font(.callout).foregroundStyle(.secondary)
-                    } else if status.changes.isEmpty {
-                        Text("还没有因学习而改变的首选。").font(.callout).foregroundStyle(.secondary)
-                    } else {
-                        TagFlow(spacing: 6) {
-                            ForEach(status.changes) { change in
-                                Tag(id: "c:" + change.id, label: "\(change.keys) \(change.learned)", detail: change.general, struck: true, status: status) {
-                                    Learning.undo(word: change.learned); status.refresh()
-                                }
-                            }
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-            SettingsGroup(title: "学习材料", footer: "最近 200 条上屏记录（按键 文字）。移到标签上点 × 删除；删除的记录下次学习不再使用，每次学习都从出厂模型重新学当前的记录。") {
-                SettingsRow(first: true) {
-                    if status.records.isEmpty {
-                        Text("还没有记录。").font(.callout).foregroundStyle(.secondary)
-                    } else {
-                        TagFlow(spacing: 6) {
-                            ForEach(status.records) { record in
-                                Tag(id: "r:\(record.id)", label: record.keys.isEmpty ? record.text : "\(record.keys) \(record.text)", detail: nil, struck: false, status: status) {
-                                    Learning.deleteEntries(times: [record.id]); status.refresh()
-                                }
-                            }
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-}
-
-
-/// One learned item as a tag; the × to remove it appears when the pointer is over it.
+/// One learned item as a tag; the × to remove it shows fully when the pointer is over it.
 struct Tag: View {
     let id: String
     let label: String
@@ -423,6 +139,7 @@ struct Tag: View {
     var struck = false
     @ObservedObject var status: LearningStatus
     let remove: () -> Void
+    private var hovered: Bool { status.hovered == id }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -431,12 +148,11 @@ struct Tag: View {
             // The × always has its place at the trailing end, so nothing moves when it shows.
             Button(action: remove) { Image(systemName: "xmark.circle.fill") }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                .opacity(status.hovered == id ? 1 : 0.25)
+                .opacity(hovered ? 1 : 0.25)
                 .frame(width: 16)
         }
-        .font(.callout)
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(status.hovered == id ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12)))
+        .background(Capsule().fill(hovered ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12)))
         .onHover { over in status.hovered = over ? id : (status.hovered == id ? nil : status.hovered) }
     }
 }
@@ -469,6 +185,159 @@ struct TagFlow: Layout {
     }
 }
 
+/// The system search field.
+struct SearchField: NSViewRepresentable {
+    let prompt: String
+    @Binding var text: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        let text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ notification: Notification) {
+            if let field = notification.object as? NSSearchField { text.wrappedValue = field.stringValue }
+        }
+    }
+}
+
+struct SettingsRootView: View {
+    @AppStorage("LearningEnabled") private var learningEnabled = true
+    @ObservedObject private var status = LearningStatus.shared
+
+    /// A grouped form: the system draws the cards, row insets and separators, each macOS in its own style.
+    var body: some View {
+        Form {
+            ShortcutsSection()
+            learningGroup
+            dataGroup
+            aboutGroup
+        }
+        .formStyle(.grouped)
+    }
+
+    private var learningGroup: some View {
+        Section {
+            HStack {
+                Toggle("自动学习", isOn: $learningEnabled)
+                    .toggleStyle(.switch)
+                    .onChange(of: learningEnabled) { _, _ in Learning.enabledChanged(); status.refresh() }
+            }
+            HStack {
+                Text(status.training ? "正在训练…" : status.text).font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("立即训练") { status.training = true; Learning.trainNow() }
+                    .disabled(status.training || !learningEnabled)
+                Button("重置学习") { Learning.reset(); status.refresh() }
+                    .disabled(status.training)
+            }
+        }
+    }
+
+    private var dataGroup: some View {
+        Section {
+            HStack {
+                Picker("", selection: $status.tab) {
+                    ForEach(LearningStatus.Tab.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                Spacer()
+                SearchField(prompt: "搜索拼音或文字", text: $status.query).frame(width: 220)
+                Spacer()
+                Button("刷新") { status.refresh() }
+            }
+            switch status.tab {
+            case .changes:
+                if status.loading && status.changes.isEmpty {
+                    loadingRow
+                } else if status.filteredChanges.isEmpty {
+                    HStack { Text(status.query.isEmpty ? "还没有数据" : "没有匹配的").font(.callout).foregroundStyle(.secondary); Spacer() }
+                } else {
+                    let rows = status.filteredChanges
+                    HStack {
+                        TagFlow(spacing: 6) {
+                            ForEach(rows[status.pageRange(rows.count)]) { change in
+                                Tag(id: "c:" + change.id, label: "\(change.keys) \(change.learned)", detail: change.general, struck: true, status: status) {
+                                    Learning.undo(keys: change.keys, word: change.learned); status.refresh()
+                                }
+                            }
+                        }
+                    }
+                }
+            case .records:
+                if status.loading && status.records.isEmpty {
+                    loadingRow
+                } else if status.filteredRecords.isEmpty {
+                    HStack { Text(status.query.isEmpty ? "还没有数据" : "没有匹配的").font(.callout).foregroundStyle(.secondary); Spacer() }
+                } else {
+                    let rows = status.filteredRecords
+                    HStack {
+                        TagFlow(spacing: 6) {
+                            ForEach(rows[status.pageRange(rows.count)]) { record in
+                                Tag(id: "r:" + record.id, label: record.keys.isEmpty ? record.text : "\(record.keys) \(record.text)", detail: record.count > 1 ? "×\(record.count)" : nil, status: status) {
+                                    Learning.deleteEntries(times: [record.time]); status.refresh()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if status.pageCount > 1 || status.filteredCount > 0 {
+                HStack {
+                    Text("共 \(status.filteredCount) 条").font(.callout).foregroundStyle(.secondary)
+                    if status.loading { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Button { status.page -= 1 } label: { Image(systemName: "chevron.left") }.disabled(status.page == 0)
+                    Text("\(status.page + 1) / \(status.pageCount)").font(.callout).monospacedDigit()
+                    Button { status.page += 1 } label: { Image(systemName: "chevron.right") }.disabled(status.page + 1 >= status.pageCount)
+                }
+            }
+        }
+    }
+
+    private var loadingRow: some View {
+        HStack {
+            ProgressView().controlSize(.small)
+            Text("正在加载…").font(.callout).foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private var version: String {
+        let info = Bundle.main.infoDictionary
+        return "版本 \(info?["CFBundleShortVersionString"] as? String ?? "—")（\(info?["CFBundleVersion"] as? String ?? "—")）"
+    }
+
+    private var aboutGroup: some View {
+        Section {
+            HStack {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Link("智能输入法", destination: URL(string: "https://github.com/chats-is/typing")!).font(.system(size: 14, weight: .semibold))
+                    Text("一款原生的 macOS 本地模型智能输入法").font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(version).font(.callout).foregroundStyle(.secondary)
+                    Text("2026 Chats.is").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Shortcuts
 
 /// Records the next key pressed for a function: a key with modifiers, or a modifier key alone.
 final class ShortcutRecorder: ObservableObject {
@@ -538,18 +407,15 @@ struct ShortcutsSection: View {
     @StateObject private var recorder = ShortcutRecorder()
 
     var body: some View {
-        SettingsGroup(title: "快捷键", footer: "固定的：空格选中高亮候选，数字选词，回车把拼音原样上屏，Esc 取消；Tab、Shift-Tab、←→ 在候选间移动，- 和 =、↑↓、PageUp 和 PageDown 翻页；符号出现后按 2 或 Tab 换成英文符号。") {
-            ForEach(Array(ShortcutFunction.allCases.enumerated()), id: \.element) { index, function in
-                SettingsRow(first: index == 0) {
+        Section {
+            ForEach(ShortcutFunction.allCases, id: \.self) { function in
+                HStack {
                     Text(function.title).frame(width: 96, alignment: .leading)
                     ForEach(store.bindings[function] ?? []) { binding in
-                        HStack(spacing: 3) {
-                            Text(binding.label)
-                            Button { store.remove(binding, from: function) } label: { Image(systemName: "xmark").font(.caption2) }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                        // The same tag as the learning data's.
+                        Tag(id: "k:\(function.rawValue):\(binding.id)", label: binding.label, detail: nil, status: LearningStatus.shared) {
+                            store.remove(binding, from: function)
                         }
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
                     }
                     Spacer()
                     Button(recorder.recording == function ? "请按键…（Esc 取消）" : "添加…") {
@@ -557,7 +423,8 @@ struct ShortcutsSection: View {
                     }
                 }
             }
-            SettingsRow {
+            HStack {
+                Text("按其中任意一个键执行对应的功能").font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 Button("恢复默认") { store.resetDefaults() }
             }

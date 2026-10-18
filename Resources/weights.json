@@ -5,6 +5,5 @@
   "n_layer": 8,
   "n_head": 8,
   "d_model": 512
- },
- "tensors": []
+ }
 }

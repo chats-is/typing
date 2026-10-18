@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds a standard macOS installer package: Scripts/release/make_pkg.sh <version> [out dir]
 # Installs Typing.app into /Library/Input Methods (all users) and registers it for the person
-# running the installer, so it appears in the input menu right away.
+# running the installer, so it appears in the input menu right away. Apple silicon, macOS 15 or later.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 VERSION="${1:?usage: make_pkg.sh <version> [out dir]}"
@@ -46,7 +46,29 @@ POST
 chmod +x "$STAGE/scripts/preinstall" "$STAGE/scripts/postinstall" "$STAGE/scripts/register"
 pkgbuild --root "$STAGE/root" --scripts "$STAGE/scripts" \
     --identifier is.chats.inputmethod.Typing.pkg --version "$VERSION" --install-location / \
-    "$OUT/Typing-$VERSION.pkg" >/dev/null
+    "$STAGE/Typing.pkg" >/dev/null
+# The installer refuses Intel Macs and systems older than the app's minimum, with the system's own
+# "can't be installed on this computer" message, instead of installing an input method that cannot run.
+MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Bundle/Info.plist)"
+cat > "$STAGE/distribution.xml" <<DIST
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>智能输入法</title>
+    <options hostArchitectures="arm64" customize="never" require-scripts="false"/>
+    <allowed-os-versions>
+        <os-version min="$MIN_OS"/>
+    </allowed-os-versions>
+    <domains enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="is.chats.inputmethod.Typing.pkg"/>
+    </choices-outline>
+    <choice id="is.chats.inputmethod.Typing.pkg" visible="false">
+        <pkg-ref id="is.chats.inputmethod.Typing.pkg"/>
+    </choice>
+    <pkg-ref id="is.chats.inputmethod.Typing.pkg" version="$VERSION" onConclusion="none">Typing.pkg</pkg-ref>
+</installer-gui-script>
+DIST
+productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE" "$OUT/Typing-$VERSION.pkg" >/dev/null
 rm -rf "$STAGE"
 (cd "$OUT" && shasum -a 256 "Typing-$VERSION.pkg" > "Typing-$VERSION.pkg.sha256")
 ls -la "$OUT/Typing-$VERSION.pkg"

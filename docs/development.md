@@ -38,7 +38,7 @@ Scripts/symtest.sh                     # 只跑按键测试
 | `eval_*.tsv`、`wordlattice/`、`personal/` | 评测集、词测试的格子导出、学习验证材料 | 下面的评测流程 |
 | `venv-train/` | Python 环境（PyTorch、coremltools、pypinyin） | `python -m venv` + pip |
 
-`Resources/` 里的三个大文件就是 `lexicon/lexicon.sqlite`、`lexicon/bigram.bin`、`lm9/LanguageModel32.mlmodelc` 的拷贝；`positions.bin` 由 `Tools/extract_positions.py` 从 `lm9/weights` 取出（完整 64 行位置表），`weights.json` 只保留结构参数。
+`Resources/` 里的三个大文件就是 `lexicon/lexicon.sqlite`、`lexicon/bigram.bin`、`lm9/LanguageModel32.mlmodelc` 的拷贝；`positions.bin` 由 `Tools/extract_positions.py` 从 `lm9/weights` 取出（完整 64 行位置表），`weights.json` 只保留结构参数（`{"config": {...}}`，不含 `tensors`）。
 
 ## 评测
 

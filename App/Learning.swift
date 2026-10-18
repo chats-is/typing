@@ -25,12 +25,16 @@ enum Learning {
         return .compiledModel(model, positions: positions, header: header)
     }
 
+    /// The fingerprint of the shipped model, written by the build (Scripts/build.sh).
+    static let modelFingerprint: String? = Bundle.main.url(forResource: "LanguageModel", withExtension: "sha256")
+        .flatMap { try? String(contentsOf: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+
     /// The tuned model to start with, if learning is on and a kept session exists.
     static func initialScorer() -> SentenceScorer? {
         guard enabled, store.hasTunedWeights, let weightsSource, let vocabulary = Bundle.main.url(forResource: "vocab", withExtension: "json") else { return nil }
         do {
-            // A tuned file from an earlier shipped model is dropped; the entries are relearned.
-            store.discardTunedWeightsUnlessMatching(try weightsSource.load())
+            // Tuned tensors learned on another shipped model are dropped; the entries are relearned.
+            store.discardTunedWeights(unlessLearnedOn: modelFingerprint)
             guard store.hasTunedWeights else { return nil }
             return try tunedCoreMLScorer(vocabulary: vocabulary) ?? GraphScorer(source: weightsSource, tunedPath: store.tunedBase, vocabularyURL: vocabulary)
         } catch {
@@ -111,17 +115,29 @@ enum Learning {
             return quick.sentences.map { (text: $0.text, score: $0.score, penalty: $0.penalty) }
         }
         learner?.generalWordsURL = Bundle.main.url(forResource: "general_words", withExtension: "tsv")
+        learner?.shippedFingerprint = modelFingerprint
         // The session compares before and after on the same runtime (GPU); the engine's own
         // scorer serves as "before" only when it is that runtime.
         learner?.engineScorer = { EngineHost.sentenceScorer as? GraphScorer }
         return learner
     }
 
-    private static func startSessionIfDue() {
+    /// Whether a session is running now (the settings window shows it).
+    static var isRunning: Bool { running }
+    /// Called on the main thread when a session ends (the settings window refreshes).
+    static var sessionEnded: (() -> Void)?
+
+    /// Runs a session now, whether or not one is due (the button in Settings). Nothing happens while
+    /// learning is off or a session is already running.
+    static func trainNow() { startSession(force: true) }
+
+    private static func startSessionIfDue() { startSession(force: false) }
+
+    private static func startSession(force: Bool) {
         guard enabled, !running else { return }
         store.flush()
         if learner == nil { learner = makeLearner() }
-        guard let learner, learner.due() else { return }
+        guard let learner, force || learner.due() else { return }
         learner.cancelled = false
         learner.paused = false
         running = true
@@ -139,8 +155,12 @@ enum Learning {
             }
             DispatchQueue.main.async {
                 running = false
+                defer { sessionEnded?() }
                 guard started == generation else { return }  // reset or switched off meanwhile
-                if outcome.accepted { install(tuned: kept) }
+                if outcome.accepted {
+                    store.clearHeldKeys()  // this model was learned without the deleted records
+                    install(tuned: kept)
+                }
             }
         }
     }
@@ -159,7 +179,9 @@ enum Learning {
     }
 
     /// Which lone words learning may move: those the person has written and not undone.
-    static func learnedWordFilter() -> (String) -> Bool { { store.hasLearned($0) && !store.isExcluded($0) } }
+    static func learnedWordFilter() -> (String) -> Bool { { store.hasLearned($0) } }
+    /// Keys whose learned order the person deleted (they keep the general order until a kept session).
+    static func heldKeysFilter() -> (String) -> Bool { { store.isHeld(keys: $0) } }
 
     /// Puts a tuned model (or, with nil, the shipped one) into the engine. With a tuned model the
     /// shipped one stays beside it so lone words move only by what was learned.
@@ -213,7 +235,8 @@ enum Learning {
     private static func learnedChanges(generation: Int, scorerID: ObjectIdentifier?, active: Bool) -> [(keys: String, learned: String, general: String)] {
         guard active, let decoder = EngineHost.lexiconDecoder else { return [] }
         let entries = store.entries()
-        let excluded = store.exclusions().count
+        // A deletion that found no record still holds its keys back: they are part of the key.
+        let excluded = store.heldKeys().count
         if let cache = changesCache, cache.count == entries.count, cache.excluded == excluded, cache.scorer == scorerID { return cache.changes }
         var seen = Set<String>()
         var changes: [(keys: String, learned: String, general: String)] = []
@@ -228,17 +251,19 @@ enum Learning {
         return changes
     }
 
-    static func undo(word: String) {
-        store.exclude(word)
-        if EngineHost.lexiconDecoder?.baseScorer != nil { EngineHost.lexiconDecoder?.setLearning(base: EngineHost.scorer, words: learnedWordFilter()) }
+    /// Deleting a learned first choice deletes its records and holds its keys: until a session has
+    /// learned the remaining records and been kept, these keys typed alone keep the general order
+    /// (the tuned model in use still ranks them the old way, and the change may come from another
+    /// word moving, not from the one shown); that session clears the hold.
+    static func undo(keys: String, word: String) {
+        store.removeEntries(keys: keys, text: word)
+        store.hold(keys: keys)
     }
     static func deleteEntries(times: Set<Double>) { store.removeEntries(times: times) }
 
     static func statusText() -> String {
         let state = store.state()
-        guard state.sessions > 0 else { return "已记录 \(store.count) 次输入，尚未学习" }
-        let decision = state.lastDecision == "kept" ? "已采用" : "已回滚（\(state.lastDecision)）"
-        return String(format: "已记录 %d 次输入；学习 %d 次，采用 %d 次；上次：%@，本人 %.0f→%.0f%%，大众 %.1f→%.1f%%",
-                      store.count, state.sessions, state.accepted, decision, state.lastPersonalBefore, state.lastPersonalAfter, state.lastGeneralBefore, state.lastGeneralAfter)
+        if state.accepted == 0 { return store.count == 0 ? "还没有学习" : "已记录 \(store.count) 条输入" }
+        return "已根据你的输入调整 \(state.accepted) 次"
     }
 }

@@ -14,8 +14,9 @@ case "$BUNDLE_ID" in *inputmethod*) ;; *) echo "error: CFBundleIdentifier '$BUND
 [ "$CONNECTION" = "${BUNDLE_ID}_Connection" ] || { echo "error: InputMethodConnectionName must be '${BUNDLE_ID}_Connection', not '$CONNECTION'" >&2; exit 1; }
 [ "$CONNECTION" = "$MACH_NAME" ] || { echo "error: the entitlement's mach-register name '$MACH_NAME' must equal InputMethodConnectionName '$CONNECTION'" >&2; exit 1; }
 
-swift build -c release --product Typing
-BIN="$(swift build -c release --show-bin-path)"
+# Apple silicon only.
+swift build -c release --arch arm64 --product Typing
+BIN="$(swift build -c release --arch arm64 --show-bin-path)"
 
 mkdir -p build/tools
 if [ ! -f Resources/AppIcon.icns ] || [ Tools/make_icons.swift -nt Resources/AppIcon.icns ]; then
@@ -31,6 +32,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Bundle/Info.plist "$APP/Contents/Info.plist"
 cp -R Bundle/*.lproj "$APP/Contents/Resources/"
 cp "$BIN/Typing" "$APP/Contents/MacOS/Typing"
+# swift build stamps the deployment target as the SDK version too, and AppKit picks the window style
+# from that SDK version: stamped 15.0, macOS 26 and later draw the app in the old style. Record the SDK
+# it was really built with; the minimum system stays LSMinimumSystemVersion, so each system still
+# draws its own style.
+MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Bundle/Info.plist)"
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+vtool -set-build-version macos "$MIN_OS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Typing" "$APP/Contents/MacOS/Typing"
 cp Resources/icon.pdf Resources/menu.pdf Resources/palette.png Resources/palette@2x.png Resources/AppIcon.icns "$APP/Contents/Resources/"
 # The engine: the lexicon (what the keys can be) and the language model (what fits the context).
 if [ -d Resources/LanguageModel.mlmodelc ] && [ -f Resources/lexicon.sqlite ]; then
@@ -40,6 +48,9 @@ else
     exit 1
 fi
 if [ -f Resources/bigram.bin ]; then cp Resources/bigram.bin "$APP/Contents/Resources/"; fi
+# The shipped model's fingerprint: learned tensors are kept with it, and tensors learned on any other
+# model (a retrained one may have the same shape) are dropped and relearned.
+cat Resources/LanguageModel.mlmodelc/weights/weight.bin $(ls Resources/positions.bin Resources/weights.json 2>/dev/null) | shasum -a 256 | cut -c1-64 > "$APP/Contents/Resources/LanguageModel.sha256"
 # Learning on this machine: the model's header and full position table (the weights themselves are
 # read out of the Core ML model), and the general check sets.
 for f in Resources/weights.json Resources/positions.bin Resources/general_lattices.tsv Resources/general_words.tsv; do [ -f "$f" ] && cp "$f" "$APP/Contents/Resources/"; done

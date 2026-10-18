@@ -23,6 +23,7 @@ enum EngineHost {
                 if let sentenceScorer, sentenceScorer !== scorer {
                     decoder.setLearning(base: scorer, words: Learning.learnedWordFilter())
                 }
+                decoder.heldKeys = Learning.heldKeysFilter()
                 return decoder
             } catch {
                 NSLog("Typing: cannot open lexicon: \(error)")
@@ -61,6 +62,12 @@ let server = IMKServer(name: connectionName, bundleIdentifier: Bundle.main.bundl
 NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in
     TypingInputController.hidePanel()
 }
+// The shipped and the tuned model each take over a second to load the first time after an update
+// (the system compiles them for the Neural Engine): load them side by side, not one after the other.
+let loading = DispatchGroup()
+DispatchQueue.global(qos: .userInitiated).async(group: loading) { _ = EngineHost.scorer }
+DispatchQueue.global(qos: .userInitiated).async(group: loading) { _ = EngineHost.sentenceScorer }
+loading.wait()
 // Warm up once at launch (model load, first Core ML call, lexicon caches) so the first keystroke
 // is as quick as the rest; the first decode otherwise takes over 100 ms.
 _ = EngineHost.decoder?.decode("nihao", precedingText: "").refined()

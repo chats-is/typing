@@ -141,13 +141,27 @@ type(".2."); key("", code: ESC); check(". then 。 (Esc closes)", text: ".。", 
 type("..2");                     check("。。2 → 。.", text: "。.", cursor: 2)
 type("."); key("", code: RIGHT); key("2", code: 19); check("。 → then 2 is typed (panel closed by arrow)", text: "。2", cursor: 2)
 type(".3");                      check("。 then 3 (no third candidate) → 。3", text: "。3", cursor: 2)
-// The panel must close by itself when the application takes the text away (Return sent it,
-// a button was clicked) and stay while the mark is still there.
-type("."); RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
-print((controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel stays while the mark is in place"); if !controller.symbolPanelShown { failures += 1 }
-client.text = NSMutableString(); client.cursor = 0
-RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
-print((!controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel closes after the application cleared the text"); if controller.symbolPanelShown { failures += 1 }
+// While the panel is up the mark is marked text (so the application hands Esc and digits to the
+// input method); Esc finishes it as shown; left alone it finishes by itself.
+type(".")
+do {
+    let ok = controller.symbolPanelShown && client.marked != nil && client.text as String == "。"
+    print((ok ? "ok   " : "FAIL ") + "。 is marked text while the panel is up"); if !ok { failures += 1 }
+}
+key("", code: ESC)
+do {
+    let ok = !controller.symbolPanelShown && client.marked == nil && client.text as String == "。" && client.cursor == 1
+    print((ok ? "ok   " : "FAIL ") + "Esc closes the panel and keeps the mark"); if !ok { failures += 1 }
+}
+client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+type(","); RunLoop.main.run(until: Date(timeIntervalSinceNow: TypingInputController.symbolFinishDelay - 1))
+print((controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel stays a little while with no key"); if !controller.symbolPanelShown { failures += 1 }
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 1.5))
+do {
+    let ok = !controller.symbolPanelShown && client.marked == nil && client.text as String == "，" && client.cursor == 1
+    print((ok ? "ok   " : "FAIL ") + "with no key it finishes by itself and keeps the mark"); if !ok { failures += 1 }
+}
+client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 type("."); key("\r", code: 36)
 print((!controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel closes on Return"); if controller.symbolPanelShown { failures += 1 }
 check("Return went to the application, mark kept", text: "。", cursor: 1)

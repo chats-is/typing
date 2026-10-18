@@ -32,13 +32,14 @@ class TypingInputController: IMKInputController {
     private var singleQuoteOpen = false
     /// The text just before the cursor, as far as it is known; context for the language model.
     private var recentText = ""
-    /// A mark just typed (already in the text) with its alternative, the key's own character, as
-    /// candidates 1 and 2 in the panel; a digit or Tab swaps the alternative in place.
+    /// A mark just typed with its alternative, the key's own character, as candidates 1 and 2 in
+    /// the panel. It is shown as marked text until it finishes: a digit or Tab picks the other one;
+    /// Esc, any other key, a click or `symbolFinishDelay` without a key finishes it as shown.
     private var symbol: (candidates: [String], choice: Int)?
-    /// While the symbol panel is up, looks at the text now and then: the application may have
-    /// taken the text away without a key reaching the input method (Return sending a message,
-    /// a click on a button), and then the panel must go too.
-    private var symbolWatch: Timer?
+    private var symbolTimer: Timer?
+    /// A mark usually ends what is being typed: left alone it finishes by itself. Typing on finishes
+    /// it at once, so this only matters when the person stops, to look at the panel and choose.
+    static let symbolFinishDelay: TimeInterval = 3
     /// For tests: whether the symbol panel is up.
     var symbolPanelShown: Bool { symbol != nil }
 
@@ -94,8 +95,13 @@ class TypingInputController: IMKInputController {
 
     override func menu() -> NSMenu! {
         let menu = NSMenu()
-        let item = NSMenuItem(title: "打开输入法设置…", action: #selector(openSettings(_:)), keyEquivalent: "")
+        let item = NSMenuItem(title: "打开设置…", action: #selector(openSettings(_:)), keyEquivalent: "")
         item.target = self
+        // Shows the key set in Settings; the key itself is handled with the other shortcuts.
+        if let shortcut = ShortcutStore.shared.menuKey(for: .openSettings) {
+            item.keyEquivalent = shortcut.key
+            item.keyEquivalentModifierMask = shortcut.modifiers
+        }
         menu.addItem(item)
         return menu
     }
@@ -120,7 +126,7 @@ class TypingInputController: IMKInputController {
     }
 
     deinit {
-        symbolWatch?.invalidate()
+        symbolTimer?.invalidate()
     }
 
     override func deactivateServer(_ sender: Any!) {
@@ -164,6 +170,10 @@ class TypingInputController: IMKInputController {
             commitRaw(client)
             // Caps Lock means its state (lock on = English); any other key toggles.
             Self.asciiMode = lockState ?? !Self.asciiMode
+            return true
+        case .openSettings:
+            commitRaw(client)
+            SettingsWindow.show()
             return true
         }
     }
@@ -326,30 +336,38 @@ class TypingInputController: IMKInputController {
 
     // MARK: - Symbols
 
-    /// A mark that was just typed, with its alternative (the key's own character). The mark is
-    /// already in the text, so the cursor is free; while the panel is up, the alternative's number
-    /// or Tab swaps it in place.
+    /// A mark that was just typed, with its alternative (the key's own character). It stays marked
+    /// text while the panel is up: an application hands every key to the input method while
+    /// something is being composed, but with the mark already in the text some (a terminal, for
+    /// one) keep keys such as Esc for themselves.
     private func composeSymbol(_ text: String, typed character: Character, client: IMKTextInput) {
         let other = String(character)
-        client.insertText(text, replacementRange: Self.noReplacement)
         remember(text)
-        guard other != text else { return }
+        guard other != text else {
+            client.insertText(text, replacementRange: Self.noReplacement)
+            return
+        }
         symbol = ([text, other], 0)
-        Self.panel.show(candidates: [text, other], highlighted: 0, hasMore: false, near: caretRect(client))
-        symbolWatch?.invalidate()
-        symbolWatch = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            guard let client = self.client(), self.symbolInPlace(client) else { self.dismissSymbol(); return }
+        showSymbol(client)
+    }
+    /// Shows the chosen mark as marked text with the panel beside it, and starts the clock that
+    /// finishes it.
+    private func showSymbol(_ client: IMKTextInput) {
+        guard let current = symbol else { return }
+        let mark = current.candidates[current.choice]
+        client.setMarkedText(mark, selectionRange: NSRange(location: mark.utf16.count, length: 0), replacementRange: Self.noReplacement)
+        Self.panel.show(candidates: current.candidates, highlighted: current.choice, hasMore: false, near: caretRect(client))
+        symbolTimer?.invalidate()
+        symbolTimer = Timer.scheduledTimer(withTimeInterval: Self.symbolFinishDelay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            if let client = self.client() { self.finishSymbol(client) } else { self.dismissSymbol() }
         }
     }
-    /// Whether the mark is still right in front of the cursor (where a number or Tab could swap it).
-    private func symbolInPlace(_ client: IMKTextInput) -> Bool {
-        guard let current = symbol else { return false }
-        let mark = current.candidates[current.choice]
-        let selection = client.selectedRange()
-        let length = mark.utf16.count
-        guard selection.location != NSNotFound, selection.length == 0, selection.location >= length else { return false }
-        return client.attributedSubstring(from: NSRange(location: selection.location - length, length: length))?.string == mark
+    /// The mark goes into the text as shown; the panel closes.
+    private func finishSymbol(_ client: IMKTextInput) {
+        guard let current = symbol else { return }
+        dismissSymbol()
+        client.insertText(current.candidates[current.choice], replacementRange: Self.noReplacement)
     }
     private func handleSymbolKey(_ event: NSEvent, character: Character?, client: IMKTextInput) -> Bool? {
         guard let current = symbol else { return nil }
@@ -358,10 +376,9 @@ class TypingInputController: IMKInputController {
         case Key.tab:
             let step = event.modifierFlags.contains(.shift) ? count - 1 : 1
             swapSymbol(to: (current.choice + step) % count, client: client)
-            Self.panel.show(candidates: current.candidates, highlighted: symbol?.choice ?? 0, hasMore: false, near: caretRect(client))
             return true
         case Key.escape:
-            dismissSymbol()
+            finishSymbol(client)
             return true
         case Key.delete:
             // The mark goes with the key; a quote's open/close state is as before it was typed.
@@ -370,41 +387,36 @@ class TypingInputController: IMKInputController {
             if Self.isSingleQuote(mark) { singleQuoteOpen.toggle() }
             recentText = String(recentText.dropLast(mark.count))
             dismissSymbol()
-            return false
+            client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: Self.noReplacement)
+            return true
         default:
             break
         }
         if let character, let digit = character.wholeNumberValue, digit >= 1, digit <= count {
             swapSymbol(to: digit - 1, client: client)
-            dismissSymbol()
+            finishSymbol(client)
             return true
         }
-        // Any other key is typed as usual: the mark stays, the panel closes, the cursor moves freely.
-        dismissSymbol()
+        // Any other key finishes the mark and is then handled as usual.
+        finishSymbol(client)
         return nil
     }
-    /// Replaces the mark in the text with the candidate at `choice`. The mark's place is read
-    /// from the client now (the insertion has landed by the time the next key arrives) and the
-    /// swap is made only when the mark is really there, in front of the cursor.
+    /// Shows the candidate at `choice` in place of the mark.
     private func swapSymbol(to choice: Int, client: IMKTextInput) {
         guard var current = symbol, choice != current.choice else { return }
         let from = current.candidates[current.choice], to = current.candidates[choice]
-        let selection = client.selectedRange()
-        let length = from.utf16.count
-        guard selection.location != NSNotFound, selection.length == 0, selection.location >= length else { return }
-        let range = NSRange(location: selection.location - length, length: length)
-        guard client.attributedSubstring(from: range)?.string == from else { return }
-        client.insertText(to, replacementRange: range)
         // The Chinese quotes' open/close state follows what is in the text.
         if Self.isDoubleQuote(from) != Self.isDoubleQuote(to) { doubleQuoteOpen.toggle() }
         if Self.isSingleQuote(from) != Self.isSingleQuote(to) { singleQuoteOpen.toggle() }
         recentText = String(recentText.dropLast(from.count)) + to
         current.choice = choice
         symbol = current
+        showSymbol(client)
     }
+    /// Closes the panel and forgets the mark (the caller has put it in the text or taken it away).
     private func dismissSymbol() {
-        symbolWatch?.invalidate()
-        symbolWatch = nil
+        symbolTimer?.invalidate()
+        symbolTimer = nil
         guard symbol != nil else { return }
         symbol = nil
         Self.panel.hide()
@@ -453,7 +465,7 @@ class TypingInputController: IMKInputController {
     /// Commits whatever is being composed as shown: a mark, or the candidates picked so far plus
     /// the unconverted pinyin as typed.
     private func commitRaw(_ client: IMKTextInput) {
-        dismissSymbol()
+        finishSymbol(client)
         guard session.isComposing else { return }
         let text = session.rawText.replacingOccurrences(of: "'", with: "")
         session.reset()

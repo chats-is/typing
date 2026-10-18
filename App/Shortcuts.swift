@@ -13,10 +13,12 @@ struct KeyBinding: Codable, Equatable, Identifiable {
 
 enum ShortcutFunction: String, CaseIterable, Codable, Identifiable {
     case toggleLanguage
+    case openSettings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .toggleLanguage: return "中英文切换"
+        case .openSettings: return "打开设置"
         }
     }
 }
@@ -41,6 +43,10 @@ final class ShortcutStore: ObservableObject {
             KeyBinding(keyCode: 56, modifiers: 0, alone: true, label: "左 Shift"),
             KeyBinding(keyCode: 60, modifiers: 0, alone: true, label: "右 Shift"),
             KeyBinding(keyCode: 57, modifiers: 0, alone: true, label: "Caps Lock"),
+        ],
+        // ⌃⌥, : comma is the usual key for settings; ⌘, belongs to every app's own settings.
+        .openSettings: [
+            KeyBinding(keyCode: 43, modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue, alone: false, label: "⌃⌥,"),
         ],
     ]
 
@@ -86,6 +92,16 @@ final class ShortcutStore: ObservableObject {
         let modifiers = event.modifierFlags.intersection(Self.relevant).rawValue
         for (function, list) in bindings where list.contains(where: { !$0.alone && $0.keyCode == event.keyCode && $0.modifiers == modifiers }) {
             return function
+        }
+        return nil
+    }
+
+    /// The first key with modifiers bound to `function`, as a menu item shows it (only keys that
+    /// are one character, which is how a menu item takes them).
+    func menuKey(for function: ShortcutFunction) -> (key: String, modifiers: NSEvent.ModifierFlags)? {
+        for binding in bindings[function] ?? [] where !binding.alone {
+            let key = binding.label.drop { "⌃⌥⇧⌘".contains($0) }
+            if key.count == 1 { return (key.lowercased(), NSEvent.ModifierFlags(rawValue: binding.modifiers)) }
         }
         return nil
     }

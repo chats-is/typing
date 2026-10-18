@@ -13,6 +13,9 @@ public final class Learner {
         public var personalBefore = 0.0, personalAfter = 0.0, personalCount = 0
         public var generalBefore = 0.0, generalAfter = 0.0, generalCount = 0
         public var wordsBefore = 0.0, wordsAfter = 0.0, wordsCount = 0
+        /// The person's own inputs typed alone: how many the tuned model learned the wrong way round
+        /// (it prefers a reading never typed with those keys that the shipped model scored lower).
+        public var typedReversed = 0, typedCount = 0
         public var seconds = 0.0
         /// The tuned model that was kept, ready for the engine (nil when nothing was kept).
         public var scorer: GraphScorer?
@@ -44,6 +47,11 @@ public final class Learner {
     public var personalTolerance = 0.5
     public var generalTolerance = 1.0
     public var wordsTolerance = 1.0
+    /// Allowed share (percent) of the person's own lone inputs the tuned model may learn the wrong
+    /// way round.
+    public var typedTolerance = 1.0
+    /// How many of the most recent distinct inputs the typed check looks at.
+    public var typedMaximum = 300
     /// Set from another thread to stop a running session early (checked between steps and before
     /// anything is written).
     public var cancelled: Bool {
@@ -64,6 +72,9 @@ public final class Learner {
         while isPaused && !isCancelled { pauseLock.wait(until: Date(timeIntervalSinceNow: 0.5)) }
         pauseLock.unlock()
     }
+    /// The fingerprint of the shipped model (written beside kept tuned tensors, so that tensors
+    /// learned on another model are never applied to this one).
+    public var shippedFingerprint: String?
     /// The model the engine is ranking with right now (the shipped one, or the shipped one plus
     /// the kept tuning): the session's "before", so no second copy of it has to be built.
     public var engineScorer: (() -> SentenceScorer?)?
@@ -115,7 +126,8 @@ public final class Learner {
         var exact = 0
         for c in cases where !c.readings.isEmpty {
             waitWhilePaused()
-            let usable = c.context.replacingOccurrences(of: "\n", with: "")
+            // The context the engine itself reads when ranking (its last characters, decoration out).
+            let usable = LexiconDecoder.usableContext(c.context)
             let prefix: [Int32] = usable.isEmpty ? [1] : [1] + scorer.contextTokens(usable, reserving: 1)
             var best: (score: Double, text: String)?
             var start = 0
@@ -133,28 +145,106 @@ public final class Learner {
         return 100 * Double(exact) / Double(cases.count)
     }
 
+    /// The tuned and shipped log probabilities of each reading of a lone word (no context).
+    private func loneScores(_ readings: [(text: String, score: Double, penalty: Double)], tuned: SentenceScorer, shipped: SentenceScorer) -> (tuned: [Double], shipped: [Double])? {
+        var a: [Double] = [], b: [Double] = []
+        var start = 0
+        while start < readings.count {
+            let batch = readings[start ..< min(start + tuned.batchSize, readings.count)].map(\.text)
+            guard let x = tuned.score(prefix: [1], candidates: batch), let y = shipped.score(prefix: [1], candidates: batch) else { return nil }
+            a += x; b += y
+            start += batch.count
+        }
+        return (a, b)
+    }
+
     /// Exact rate of lone words under the engine's lone-word rule with learning: lexicon score +
-    /// contextWeight × (log P tuned − log P shipped); `tuned == shipped` gives the lexicon order.
+    /// contextWeight × the learned lift (words the person has written only); `tuned == shipped`
+    /// gives the lexicon order.
     func loneExactRate(_ cases: [Case], tuned: SentenceScorer, shipped: SentenceScorer) -> Double {
         guard !cases.isEmpty else { return 0 }
         let learned = store.learnedStrings()
         var exact = 0
         for c in cases where !c.readings.isEmpty {
             waitWhilePaused()
-            var best: (score: Double, text: String)?
-            var start = 0
-            while start < c.readings.count {
-                let batch = Array(c.readings[start ..< min(start + tuned.batchSize, c.readings.count)])
-                guard let a = tuned.score(prefix: [1], candidates: batch.map(\.text)), let b = shipped.score(prefix: [1], candidates: batch.map(\.text)) else { break }
-                for (reading, (ta, tb)) in zip(batch, zip(a, b)) {
-                    let final = reading.score + (learned.contains(reading.text) ? Self.contextWeight * (ta - tb) : 0)
-                    if best == nil || final > best!.score { best = (final, reading.text) }
-                }
-                start += batch.count
-            }
-            if best?.text == c.expected { exact += 1 }
+            guard let (a, b) = loneScores(c.readings, tuned: tuned, shipped: shipped) else { continue }
+            let lift = LexiconDecoder.learnedLift(tuned: a, base: b)
+            let final = c.readings.indices.map { c.readings[$0].score + (learned.contains(c.readings[$0].text) ? Self.contextWeight * lift[$0] : 0) }
+            if let best = final.indices.max(by: { final[$0] < final[$1] }), c.readings[best].text == c.expected { exact += 1 }
         }
         return 100 * Double(exact) / Double(cases.count)
+    }
+
+    /// One of the person's inputs, typed alone, whose text the lexicon puts first.
+    struct TypedCase { let text: String; let typedWithKeys: Set<String>; let readings: [(text: String, score: Double, penalty: Double)] }
+
+    /// The most recent distinct inputs with keys whose text is the lexicon's first reading of those
+    /// keys alone.
+    func typedCases(_ entries: [LearningStore.Entry]) -> [TypedCase] {
+        var typed: [String: Set<String>] = [:]
+        for entry in entries where !entry.keys.isEmpty { typed[entry.keys, default: []].insert(entry.text) }
+        var seen = Set<String>(), cases: [TypedCase] = []
+        for entry in entries.reversed() where !entry.keys.isEmpty && seen.insert(entry.keys + "\u{1F}" + entry.text).inserted {
+            if cases.count >= typedMaximum { break }
+            waitWhilePaused()
+            let readings = readings(entry.keys, "")
+            guard let first = readings.max(by: { $0.score < $1.score }), first.text == entry.text else { continue }
+            cases.append(TypedCase(text: entry.text, typedWithKeys: typed[entry.keys] ?? [], readings: readings))
+        }
+        return cases
+    }
+
+    /// How many of `cases` the tuned model itself learned the wrong way round: the shipped model
+    /// scores the person's word above a reading never typed with those keys, the tuned one below it.
+    /// This judges the model, not the ranking rule (which never moves a word down).
+    func typedReversed(_ cases: [TypedCase], tuned: SentenceScorer, shipped: SentenceScorer) -> Int {
+        var reversed = 0
+        for c in cases {
+            waitWhilePaused()
+            guard let (a, b) = loneScores(c.readings, tuned: tuned, shipped: shipped), let t = c.readings.firstIndex(where: { $0.text == c.text }) else { continue }
+            let flipped = c.readings.indices.contains { u in
+                u != t && !c.typedWithKeys.contains(c.readings[u].text) && b[t] >= b[u] && a[t] < a[u]
+            }
+            if flipped { reversed += 1 }
+        }
+        return reversed
+    }
+
+    /// What a session trains on: the sentences the inputs were typed in (the text before each on its
+    /// line, decoration out, then the input), one per time it was typed in it, for the times whose
+    /// context is kept; a sentence that only starts a longer one is left out. Then each input on its
+    /// own, once, unless it already stands as a sentence. A sentence said again is learned again; a
+    /// lone word is never repeated (measured 2026-10-18 on the Mac mini: repeating short inputs by
+    /// how often they were typed gathered the model's probability on a few frequent characters, with
+    /// more readings learned the wrong way round, general text worse and nothing gained in context,
+    /// while repeated whole sentences, as in the forum2 demo, help).
+    static func material(_ inputs: [LearningStore.Entry]) -> [String] {
+        var said: [(time: Double, sentence: String)] = []
+        for input in inputs {
+            let kept = input.contexts.count
+            for (time, context) in zip(input.times.suffix(kept), input.contexts.suffix(input.times.count)) {
+                said.append((time, sentenceBefore(context) + input.text))
+            }
+        }
+        said.sort { $0.time < $1.time }
+        // In sorted order a string that starts a longer one is followed by one that starts with it.
+        let sorted = Set(said.map(\.sentence)).sorted()
+        var starts = Set<String>()
+        for (s, next) in zip(sorted, sorted.dropFirst()) where next.hasPrefix(s) { starts.insert(s) }
+        var material = said.map(\.sentence).filter { !starts.contains($0) }
+        let standing = Set(material)
+        var alone = Set<String>()
+        for input in inputs where !standing.contains(input.text) && alone.insert(input.text).inserted { material.append(input.text) }
+        return material
+    }
+
+    /// The text before the cursor on its own line, without box drawing, prompt marks and the
+    /// spaces around them.
+    static func sentenceBefore(_ context: String) -> String {
+        let line = context.split(separator: "\n", omittingEmptySubsequences: false).last.map(String.init) ?? ""
+        var text = String(String.UnicodeScalarView(line.unicodeScalars.filter { !LexiconDecoder.isDecoration($0) })).trimmingCharacters(in: .whitespaces)
+        while let first = text.first, ">$%#".contains(first) { text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces) }
+        return text
     }
 
     /// Runs one session; blocking, meant for a background thread.
@@ -162,14 +252,15 @@ public final class Learner {
         var outcome = Outcome()
         let started = Date()
         var state = store.state()
-        let entries = store.entries()
+        // Each input once, with the times it was typed and the sentences it was typed in.
+        let inputs = store.entries()
         // Only a session that trained is booked (a cancelled one writes nothing: the store may
         // just have been reset); one that found too little text is simply tried again later.
         var trained = false
         defer {
             if trained && !cancelled {
                 state.lastSessionTime = Date().timeIntervalSince1970
-                state.entriesAtLastSession = entries.count
+                state.entriesAtLastSession = inputs.count  // distinct inputs, as `due` counts them
                 state.sessions += 1
                 if outcome.accepted { state.accepted += 1 }
                 state.lastPersonalBefore = outcome.personalBefore; state.lastPersonalAfter = outcome.personalAfter
@@ -178,22 +269,17 @@ public final class Learner {
                 store.save(state)
             }
         }
-        guard entries.count >= minimumNewEntries else { outcome.reason = "too little text"; return outcome }
+        guard inputs.count >= minimumNewEntries else { outcome.reason = "too little text"; return outcome }
 
-        // Held out: the most recent entries, judged with their real keys and context.
-        let heldOutCount = min(heldOutMaximum, max(heldOutMinimum, Int(Double(entries.count) * heldOutFraction)))
-        var heldOut: [LearningStore.Entry] = []
-        var training: [LearningStore.Entry] = []
-        for entry in entries.reversed() {
-            if heldOut.count < heldOutCount, !entry.keys.isEmpty, heldOut.count + training.count < entries.count - heldOutCount || training.isEmpty {
-                heldOut.append(entry)
-            } else {
-                training.append(entry)
-            }
-        }
-        heldOut.reverse(); training.reverse()
-        if heldOut.count >= entries.count { training = entries; heldOut = [] }
-        let text = training.map(\.text).joined(separator: "\n")
+        // Held out: the most recent distinct inputs, each once as last typed, judged with their real
+        // keys and context; none of their occurrences is trained on, so the check never sees an
+        // answer it was taught.
+        let heldOutCount = min(heldOutMaximum, max(heldOutMinimum, Int(Double(inputs.count) * heldOutFraction)))
+        var heldOut = Array(inputs.reversed().filter { !$0.keys.isEmpty }.prefix(heldOutCount).reversed())
+        let heldOutInputs = Set(heldOut.map(\.identity))
+        var training = inputs.filter { !heldOutInputs.contains($0.identity) }
+        if training.isEmpty { training = inputs; heldOut = [] }
+        let text = Self.material(training).joined(separator: "\n")
         let stream = encode(text)
         guard stream.count > 2 * 64 + 2 else { outcome.reason = "too little text"; return outcome }  // two training windows
 
@@ -206,6 +292,8 @@ public final class Learner {
             let personalCases = heldOut.map { Case(expected: $0.text, context: $0.context, readings: readings($0.keys, $0.context)) }
             let general = generalCases()
             let words = generalWordCases()
+            let typed = typedCases(inputs)
+            outcome.typedCount = typed.count
             outcome.personalCount = personalCases.count
             outcome.generalCount = general.count
             outcome.wordsCount = words.count
@@ -260,26 +348,32 @@ public final class Learner {
             let after = try GraphScorer(weights: tunedWeights, vocabularyURL: vocabularyURL)
             outcome.personalAfter = exactRate(personalCases, scorer: after)
             outcome.generalAfter = exactRate(general, scorer: after)
-            outcome.wordsAfter = try loneExactRate(words, tuned: after, shipped: shipped ?? GraphScorer(weights: shippedWeights, vocabularyURL: vocabularyURL))
-            log?("after: personal \(outcome.personalAfter) general \(outcome.generalAfter) words \(outcome.wordsAfter)")
+            let reference = try shipped ?? GraphScorer(weights: shippedWeights, vocabularyURL: vocabularyURL)
+            outcome.wordsAfter = loneExactRate(words, tuned: after, shipped: reference)
+            outcome.typedReversed = typedReversed(typed, tuned: after, shipped: reference)
+            log?("after: personal \(outcome.personalAfter) general \(outcome.generalAfter) words \(outcome.wordsAfter) typed reversed \(outcome.typedReversed)/\(outcome.typedCount)")
 
+            let typedOK = typed.isEmpty || 100 * Double(outcome.typedReversed) / Double(typed.count) <= typedTolerance
             let wordsOK = words.isEmpty || outcome.wordsAfter >= outcome.wordsBefore - wordsTolerance
             let generalOK = (general.isEmpty || outcome.generalAfter >= outcome.generalBefore - generalTolerance) && wordsOK
             let personalOK = personalCases.count < heldOutMinimum || outcome.personalAfter >= outcome.personalBefore - personalTolerance
             if cancelled { outcome.reason = "cancelled"; return outcome }
-            if generalOK && personalOK {
+            if generalOK && personalOK && typedOK {
                 // The .bin goes first: a .json without its .bin would be taken for tuned weights.
                 for ext in [".bin", ".json"] {
                     let from = URL(fileURLWithPath: candidateBase + ext), to = URL(fileURLWithPath: store.tunedBase + ext)
                     _ = try FileManager.default.replaceItemAt(to, withItemAt: from)
                     try? FileManager.default.removeItem(at: from)
                 }
+                // Last: tensors without it are taken for another model's and relearned.
+                if let shippedFingerprint { try shippedFingerprint.write(to: store.tunedModelURL, atomically: true, encoding: .utf8) }
+                else { try? FileManager.default.removeItem(at: store.tunedModelURL) }
                 outcome.accepted = true
                 outcome.reason = "kept"
                 outcome.scorer = after
             } else {
                 for ext in [".json", ".bin"] { try? FileManager.default.removeItem(atPath: candidateBase + ext) }
-                outcome.reason = !wordsOK ? "common words got worse" : generalOK ? "personal input got worse" : "general input got worse"
+                outcome.reason = !typedOK ? "typed words learned the wrong way round" : !wordsOK ? "common words got worse" : !generalOK ? "general input got worse" : "personal input got worse"
             }
         } catch {
             outcome.reason = "error: \(error)"

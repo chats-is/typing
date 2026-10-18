@@ -23,6 +23,9 @@ public final class GraphScorer: SentenceScorer {
 
     struct TensorInfo: Decodable { let name: String; let shape: [Int]; let offset: Int; let count: Int }
     struct Header: Decodable { let config: [String: Int]; let tensors: [TensorInfo] }
+    /// The shipped model's header (Resources/weights.json): only the architecture, its tensors being
+    /// read out of the compiled Core ML model.
+    struct ModelHeader: Decodable { let config: [String: Int] }
 
     /// Stored tensors: fp16 in the shipped file, fp32 in a tuned file; both read into fp16 Data.
     public struct Weights {
@@ -68,7 +71,7 @@ public final class GraphScorer: SentenceScorer {
         /// position table (the 32-row model keeps only its first rows) and the architecture from
         /// the header file. One copy of the model in the bundle serves both runtimes and learning.
         public init(compiledModel: URL, positions: URL, header: URL) throws {
-            let head = try JSONDecoder().decode(Header.self, from: Data(contentsOf: header))
+            let head = try JSONDecoder().decode(ModelHeader.self, from: Data(contentsOf: header))
             config = head.config
             let blob = try Data(contentsOf: compiledModel.appendingPathComponent("weights/weight.bin"), options: .mappedIfSafe)
             tensors = [:]

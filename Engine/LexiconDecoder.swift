@@ -42,11 +42,14 @@ public final class LexiconDecoder: CandidateDecoding {
         learnedWords = words
     }
     /// The shipped model beside a tuned `scorer`: for a lone word with no context, the order stays
-    /// the lexicon's (general usage) except for what this machine has learned - the change of the
-    /// model's probability from shipped to tuned is added, so only words the person actually uses move.
+    /// the lexicon's (general usage) except for what this machine has learned: a word the person
+    /// actually uses gains its lift (`learnedLift`), so only those words move, and only up.
     public var baseScorer: SentenceScorer?
     /// Which words the person has actually written (learning may move only those as lone words).
     public var learnedWords: ((String) -> Bool)?
+    /// Keys (letters only) whose learned order the person deleted: typed alone they keep the
+    /// general order until the next kept learning session.
+    public var heldKeys: ((String) -> Bool)?
     /// Word-pair statistics over everyday text (Tools/build_bigram.py), so the lattice search
     /// itself prefers words that go together; nil falls back to word frequencies alone.
     private let bigram: BigramModel?
@@ -212,6 +215,8 @@ public final class LexiconDecoder: CandidateDecoding {
                 if !slips.isEmpty { sentences = Array(sentences.prefix(max(1, sentenceCount - slips.count))) + slips }
             }
         }
+        // Keys whose learned order was deleted are ranked without what was learned.
+        let held = heldKeys?(input.filter(\.isLetter).lowercased()) ?? false
         if deferRerank, scorer != nil, sentences.count > 1 {
             // Show the lattice's reading at once; the model's say arrives as the second look.
             var quick = chinesePriority(chosen.result)
@@ -219,7 +224,7 @@ public final class LexiconDecoder: CandidateDecoding {
             let finalSentences = sentences
             // The second look runs off the main thread without the decoder's lock, so it works on
             // a snapshot of the model and the learning pair taken here, under the lock.
-            let (model, base, learned) = (scorer, baseScorer, learnedWords)
+            let (model, base, learned) = (scorer, held ? nil : baseScorer, learnedWords)
             quick.refine = { [self] isCancelled in
                 if isCancelled() { return nil }
                 var better = self.chinesePriority(self.rerank(chosen.result, sentences: finalSentences, precedingText: precedingText, scorer: model, base: base, learned: learned))
@@ -229,13 +234,21 @@ public final class LexiconDecoder: CandidateDecoding {
             }
             return quick
         }
-        return chinesePriority(rerank(chosen.result, sentences: sentences, precedingText: precedingText, scorer: scorer, base: baseScorer, learned: learnedWords))
+        return chinesePriority(rerank(chosen.result, sentences: sentences, precedingText: precedingText, scorer: scorer, base: held ? nil : baseScorer, learned: learnedWords))
     }
 
     /// Text before the cursor that is worth conditioning on: its last characters, when Chinese.
+    /// Box drawing and prompt marks are left out: in a terminal they frame the line being typed
+    /// (────, ❯) and are no part of what is being said.
     static func usableContext(_ text: String) -> String {
-        let tail = String(text.suffix(24))
+        let recent = text.suffix(64).unicodeScalars.filter { !isDecoration($0) }
+        let tail = String(String(String.UnicodeScalarView(recent)).suffix(24))
         return tail.contains(where: { ("\u{4E00}"..."\u{9FFF}").contains($0) }) ? tail : ""
+    }
+
+    /// Box drawing characters and the prompt marks terminals draw.
+    static func isDecoration(_ scalar: Unicode.Scalar) -> Bool {
+        (0x2500...0x257F).contains(scalar.value) || scalar.value == 0x276F || scalar.value == 0x23FA
     }
 
     /// Lets the language model choose among the best whole-buffer readings and puts its picks first.
@@ -318,6 +331,19 @@ public final class LexiconDecoder: CandidateDecoding {
 
     /// Lone word, no context, learning on: lexicon order plus contextWeight × (log P under the
     /// tuned model − log P under the shipped model) for each reading. Untaught words keep their place.
+    /// How far learning lifts each reading of a lone word: its change of log probability from the
+    /// shipped to the tuned model, less the median change over all the readings, never below zero.
+    /// Tuning moves nearly every lone reading a little (mostly down, as probability gathers on what
+    /// is typed most); only the person's words are moved, so the shared part of the change is taken
+    /// out first, or a word they typed would sink below readings they never typed merely because
+    /// those are not moved at all. A word is never moved down.
+    static func learnedLift(tuned: [Double], base: [Double]) -> [Double] {
+        let change = zip(tuned, base).map { $0 - $1 }
+        guard !change.isEmpty else { return [] }
+        let median = change.sorted()[change.count / 2]
+        return change.map { max(0, $0 - median) }
+    }
+
     private func rerankLoneWordByLearning(_ result: DecodeResult, sentences: [Sentence], tuned: SentenceScorer, base: SentenceScorer, learned: ((String) -> Bool)?) -> DecodeResult {
         let texts = sentences.map(\.candidate.text)
         // Only readings the person has written can move; with none among them the models are not asked.
@@ -332,8 +358,9 @@ public final class LexiconDecoder: CandidateDecoding {
             start += batch.count
         }
         var ranked = sentences.map(\.candidate)
+        let lift = Self.learnedLift(tuned: tunedScores, base: baseScores)
         for i in ranked.indices where movable[i] {
-            ranked[i].score += contextWeight * (tunedScores[i] - baseScores[i])
+            ranked[i].score += contextWeight * lift[i]
         }
         ranked.sort { $0.score > $1.score }
         var reranked = result

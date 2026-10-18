@@ -14,6 +14,8 @@ ln -s "/Library/Input Methods" "$STAGE/Input Methods"
 cat > "$STAGE/安装说明.txt" <<'NOTE'
 智能输入 安装
 
+需要 M 系列芯片的 Mac，macOS 15 或更高版本。
+
 把 Typing.app 拖到旁边的 Input Methods 文件夹里（系统会要求管理员密码），
 然后到 系统设置 › 键盘 › 输入法 添加“智能输入”，或注销后重新登录。
 想一步装好并自动启用，用发布页上的 .pkg 安装包。
