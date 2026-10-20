@@ -31,6 +31,7 @@ public final class Lexicon {
     private var leadingStmt: OpaquePointer?
     private var englishStmt: OpaquePointer?
     private var charactersStmt: OpaquePointer?
+    private var symbolsStmt: OpaquePointer?
 
     private var exactCache: [String: [Entry]] = [:]
     private var prefixCache: [String: Bool] = [:]
@@ -38,6 +39,10 @@ public final class Lexicon {
     private var abbreviationCache: [String: [Entry]] = [:]
     private var englishCache: [String: [Entry]] = [:]
     private var charactersCache: [String: [Entry]] = [:]
+    private var symbolsCache: [String: [String]] = [:]
+    /// The names marks are typed by (引号, 百分号, ...): read once, so that a candidate is looked up
+    /// only when it is one.
+    public private(set) var symbolNames: Set<String> = []
     private static let cacheLimit = 20_000
     /// SQLite statements and caches are shared; the deferred rerank and learning query from other threads.
     private let queryLock = NSRecursiveLock()
@@ -93,6 +98,14 @@ public final class Lexicon {
         }
         sqlite3_prepare_v2(db, "\(columns) INDEXED BY idx_n_key WHERE n = ?1 AND key >= ?2 AND key < ?3 AND key GLOB ?4 ORDER BY logp DESC LIMIT \(Lexicon.abbreviationLimit)", -1, &leadingStmt, nil)
         sqlite3_prepare_v2(db, "SELECT word, 0, key, logp FROM english WHERE key = ?1 ORDER BY logp DESC LIMIT 8", -1, &englishStmt, nil)
+        // Marks typed by their names (lexicons built before the table have none).
+        if sqlite3_prepare_v2(db, "SELECT mark FROM symbols WHERE key = ?1 AND name = ?2 ORDER BY rank", -1, &symbolsStmt, nil) == SQLITE_OK {
+            var names: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT DISTINCT name FROM symbols", -1, &names, nil) == SQLITE_OK {
+                while sqlite3_step(names) == SQLITE_ROW { symbolNames.insert(String(cString: sqlite3_column_text(names, 0))) }
+            }
+            sqlite3_finalize(names)
+        }
         // The rare characters live in a table of their own (lexicons built before it have none).
         if sqlite3_prepare_v2(db, "SELECT word, wid, key, logp FROM lexicon WHERE key = ?1 AND n = 1 UNION ALL SELECT word, 0, key, logp FROM rare_characters WHERE key = ?1 ORDER BY 4 DESC", -1, &charactersStmt, nil) != SQLITE_OK {
             sqlite3_finalize(charactersStmt)
@@ -114,6 +127,7 @@ public final class Lexicon {
         sqlite3_finalize(leadingStmt)
         sqlite3_finalize(englishStmt)
         sqlite3_finalize(charactersStmt)
+        sqlite3_finalize(symbolsStmt)
         sqlite3_close(db)
     }
 
@@ -137,6 +151,21 @@ public final class Lexicon {
         let result = collect(charactersStmt)
         store(result, for: syllable, in: &charactersCache)
         return result
+    }
+
+    /// The marks typed by the name `name` read `key` (引号 yin'hao: 「」『』…), in their order.
+    public func symbols(named name: String, key: String) -> [String] {
+        queryLock.lock(); defer { queryLock.unlock() }
+        guard symbolsStmt != nil else { return [] }
+        let cacheKey = key + "|" + name
+        if let cached = symbolsCache[cacheKey] { return cached }
+        sqlite3_bind_text(symbolsStmt, 1, key, -1, Self.transient)
+        sqlite3_bind_text(symbolsStmt, 2, name, -1, Self.transient)
+        var marks: [String] = []
+        while sqlite3_step(symbolsStmt) == SQLITE_ROW { marks.append(String(cString: sqlite3_column_text(symbolsStmt, 0))) }
+        sqlite3_reset(symbolsStmt)
+        symbolsCache[cacheKey] = marks
+        return marks
     }
 
     /// Whether any word's pinyin is `key` or starts with `key` followed by more syllables.

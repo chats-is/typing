@@ -15,6 +15,7 @@ Tables:
   syllables(s)                                 every full syllable
   english(key, word, logp)                     key: the lowercase word; word: as it is written
   rare_characters(key, word, logp)             characters only the full list of a lone syllable shows
+  symbols(key, name, mark, rank)               marks offered right after their name (yinhao: 引号 「」 『』)
 """
 import json
 import math
@@ -37,6 +38,67 @@ VOCAB = os.path.join(ROOT, "Data", "lm9", "vocab.json")  # the language model's 
 # The Unicode blocks of Chinese characters (GB 18030 maps all of them): the basic block, extensions
 # A to H and the compatibility ideographs.
 HANZI_BLOCKS = [(0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x20000, 0x2EBEF), (0x30000, 0x323AF), (0xF900, 0xFAFF)]
+# Marks typed by their names (two syllables or more: one-syllable names such as du would crowd
+# the usual characters): yinhao offers 「」『』 right after 引号, including the marks no key gives
+# (the keys type the system Pinyin's ones; GB/T 19246-2003 table 1 has more). They are kept in a
+# table of their own, symbols, and placed after their name once the candidates are ranked: as
+# words they took part in the ranking, and after some text the model put "，" before 逗号.
+SYMBOLS = {
+    # Punctuation (GB/T 15834 names).
+    "dou'hao": ("逗号", ["，"]),
+    "ju'hao": ("句号", ["。", "．"]),
+    "wen'hao": ("问号", ["？"]),
+    "tan'hao": ("叹号", ["！"]),
+    "gan'tan'hao": ("感叹号", ["！"]),
+    "mao'hao": ("冒号", ["："]),
+    "fen'hao": ("分号", ["；"]),
+    "dun'hao": ("顿号", ["、"]),
+    "yin'hao": ("引号", ["「」", "『』", "“”", "‘’"]),
+    "shuang'yin'hao": ("双引号", ["“”", "『』"]),
+    "dan'yin'hao": ("单引号", ["‘’", "「」"]),
+    "kuo'hao": ("括号", ["（）", "【】", "〔〕", "［］", "｛｝"]),
+    "yuan'kuo'hao": ("圆括号", ["（）"]),
+    "fang'kuo'hao": ("方括号", ["［］", "【】"]),
+    "liu'jiao'kuo'hao": ("六角括号", ["〔〕"]),
+    "fang'tou'kuo'hao": ("方头括号", ["【】"]),
+    "hua'kuo'hao": ("花括号", ["｛｝"]),
+    "shu'ming'hao": ("书名号", ["《》", "〈〉"]),
+    "sheng'lve'hao": ("省略号", ["……"]),
+    "po'zhe'hao": ("破折号", ["——"]),
+    "lian'jie'hao": ("连接号", ["—", "－", "～"]),
+    "bo'lang'hao": ("波浪号", ["～"]),
+    "jian'ge'hao": ("间隔号", ["·"]),
+    "xie'gang": ("斜杠", ["／"]),
+    "fan'xie'gang": ("反斜杠", ["＼"]),
+    # Numbers and units.
+    "bai'fen'hao": ("百分号", ["％"]),
+    "qian'fen'hao": ("千分号", ["‰"]),
+    "she'shi'du": ("摄氏度", ["℃"]),
+    "du'shu": ("度数", ["°"]),
+    "cheng'hao": ("乘号", ["×"]),
+    "chu'hao": ("除号", ["÷"]),
+    "jia'hao": ("加号", ["＋"]),
+    "jian'hao": ("减号", ["－"]),
+    "deng'hao": ("等号", ["＝"]),
+    "zheng'fu'hao": ("正负号", ["±"]),
+    "yue'deng'yu": ("约等于", ["≈"]),
+    "bu'deng'yu": ("不等于", ["≠"]),
+    "da'yu'deng'yu": ("大于等于", ["≥"]),
+    "xiao'yu'deng'yu": ("小于等于", ["≤"]),
+    # Money.
+    "ren'min'bi": ("人民币", ["￥"]),
+    "mei'yuan": ("美元", ["$"]),
+    "ou'yuan": ("欧元", ["€"]),
+    "ying'bang": ("英镑", ["£"]),
+    # Marks.
+    "jian'tou": ("箭头", ["→", "←", "↑", "↓"]),
+    "dui'hao": ("对号", ["√", "✓"]),
+    "cuo'hao": ("错号", ["×", "✗"]),
+    "xing'hao": ("星号", ["＊", "★", "☆", "※"]),
+    "yuan'quan": ("圆圈", ["○", "●"]),
+    "fang'kuang": ("方框", ["□", "■"]),
+    "san'jiao'xing": ("三角形", ["△", "▲"]),
+}
 MAX_SYLLABLES = 8
 # Occurrences per million characters a word is credited with for being listed by this many lexicons.
 FLOOR = {2: 0.03, 3: 0.08, 4: 0.2, 5: 0.3, 6: 0.5, 7: 0.7, 8: 1.0}
@@ -204,10 +266,24 @@ def main():
     print(f"{len(english):,} English words, {sum(len(v) for v in english.values()):,} ways of writing them")
 
 
+    # A name the lexicon lacks (六角括号) is added as a word, so its marks have something to follow.
+    symbol_words = set()
+    symbol_rows = []
+    for key, (name, marks) in SYMBOLS.items():
+        if (key, name) not in entries:
+            entries[(key, name)] = FLOOR[2]
+            symbol_words.add(name)
+        symbol_rows += [(key, name, mark, rank) for rank, mark in enumerate(marks)]
+    print(f"{len(symbol_rows)} marks typed by their names ({len(symbol_words)} names added as words)")
+
     total = sum(entries.values()) + sum(rate for written in english.values() for _, rate in written)
     english_rows = [(lower, form, math.log(rate / total)) for lower, written in english.items() for form, rate in written]
     rare_rows = sorted(((key, word, math.log(rate / total)) for (key, word), rate in rare_entries.items()), key=lambda r: (r[0], -r[2]))
+    # The added names' ids come after all others, so the ids the bigram model was counted on stay.
     wids = {}
+    for _key, word in sorted(entries):
+        if word not in symbol_words:
+            wids.setdefault(word, len(wids) + 1)
     for _key, word in sorted(entries):
         wids.setdefault(word, len(wids) + 1)
     rows = sorted(
@@ -226,6 +302,9 @@ def main():
     db.execute("CREATE TABLE rare_characters(key TEXT NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL)")
     db.executemany("INSERT INTO rare_characters VALUES (?,?,?)", rare_rows)
     db.execute("CREATE INDEX idx_rare ON rare_characters(key, logp DESC)")
+    db.execute("CREATE TABLE symbols(key TEXT NOT NULL, name TEXT NOT NULL, mark TEXT NOT NULL, rank INTEGER NOT NULL)")
+    db.executemany("INSERT INTO symbols VALUES (?,?,?,?)", symbol_rows)
+    db.execute("CREATE INDEX idx_symbols ON symbols(key, name, rank)")
     db.executemany("INSERT INTO lexicon VALUES (?,?,?,?,?,?)", rows)
     db.executemany("INSERT INTO syllables VALUES (?)", ((s,) for s in syllables))
     db.executemany("INSERT INTO english VALUES (?,?,?)", english_rows)

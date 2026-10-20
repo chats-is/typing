@@ -332,12 +332,31 @@ public final class LexiconDecoder: CandidateDecoding {
         return canShow(text)
     }
 
-    /// The result as offered: what this Mac cannot draw left out, Chinese before English.
+    /// The result as offered: what this Mac cannot draw left out, Chinese before English, and the
+    /// marks a name stands for right after it (yinhao: 引号 「」 『』). The marks are placed once the
+    /// ranking is done: they are no words, and the model, which likes punctuation after text, would
+    /// put them first.
     private func finish(_ result: DecodeResult) -> DecodeResult {
-        guard canShow != nil, result.candidates.contains(where: { !showable($0.text) }) else { return chinesePriority(result) }
         var shown = result
-        shown.candidates = result.candidates.filter { showable($0.text) }
-        return chinesePriority(shown)
+        if canShow != nil, result.candidates.contains(where: { !showable($0.text) }) {
+            shown.candidates = result.candidates.filter { showable($0.text) }
+        }
+        shown = chinesePriority(shown)
+        let names = lexicon.symbolNames
+        guard !names.isEmpty, let whole = shown.candidates.map(\.consumed).max(),
+              shown.candidates.contains(where: { $0.consumed == whole && names.contains($0.text) }) else { return shown }
+        var withMarks: [Candidate] = []
+        var named = Set<String>(), marks = Set<String>()
+        for candidate in shown.candidates where !(marks.contains(candidate.text) && candidate.consumed == whole) {
+            withMarks.append(candidate)
+            guard candidate.consumed == whole, names.contains(candidate.text), candidate.words.count == 1,
+                  let word = candidate.words.first, word.wid != 0, named.insert(candidate.text).inserted else { continue }
+            for mark in lexicon.symbols(named: candidate.text, key: word.key) where showable(mark) && marks.insert(mark).inserted {
+                withMarks.append(Candidate(text: mark, consumed: candidate.consumed, words: [WordRef(text: mark, wid: 0, key: word.key)], score: candidate.score))
+            }
+        }
+        shown.candidates = withMarks
+        return shown
     }
 
     /// Moves the best Chinese word in front of English-containing readings of the same length. Only a

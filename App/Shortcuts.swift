@@ -28,6 +28,7 @@ enum ShortcutFunction: String, CaseIterable, Codable, Identifiable {
 final class ShortcutStore: ObservableObject {
     static let shared = ShortcutStore()
     private static let defaultsKey = "ShortcutBindings"
+    private static let capsLockMigratedKey = "CapsLockIsCapitalsLock"
 
     static let modifierKeys: [UInt16: NSEvent.ModifierFlags] = [
         54: .command, 55: .command, 56: .shift, 60: .shift, 58: .option, 61: .option, 59: .control, 62: .control,
@@ -42,7 +43,6 @@ final class ShortcutStore: ObservableObject {
         .toggleLanguage: [
             KeyBinding(keyCode: 56, modifiers: 0, alone: true, label: "左 Shift"),
             KeyBinding(keyCode: 60, modifiers: 0, alone: true, label: "右 Shift"),
-            KeyBinding(keyCode: 57, modifiers: 0, alone: true, label: "Caps Lock"),
         ],
         // ⌃⌥, : comma is the usual key for settings; ⌘, belongs to every app's own settings.
         .openSettings: [
@@ -60,6 +60,17 @@ final class ShortcutStore: ObservableObject {
             bindings = loaded
         } else {
             bindings = Self.defaults
+        }
+        // Caps Lock switched languages by default until 2026-10-20; it is the capitals lock now, as in
+        // other third-party input methods. Once: take it off language switching, and give Shift back
+        // when nothing else switches.
+        if !UserDefaults.standard.bool(forKey: Self.capsLockMigratedKey) {
+            if bindings[.toggleLanguage]?.contains(where: { $0.keyCode == 57 }) == true {
+                bindings[.toggleLanguage]?.removeAll { $0.keyCode == 57 }
+                if bindings[.toggleLanguage]?.isEmpty ?? true { bindings[.toggleLanguage] = Self.defaults[.toggleLanguage] }
+                save()
+            }
+            UserDefaults.standard.set(true, forKey: Self.capsLockMigratedKey)
         }
         // Keys of the earlier, picker-based settings.
         for key in ["ToggleCapsLock", "ToggleShift", "PageKeys", "SuggestionsEnabled"] { UserDefaults.standard.removeObject(forKey: key) }

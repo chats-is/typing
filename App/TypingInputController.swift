@@ -21,8 +21,8 @@ class TypingInputController: IMKInputController {
     }()
     private var page = 0
     private var highlight = 0
-    /// Chinese or plain English typing: Caps Lock switches like the system's Chinese keyboards
-    /// (lock on = English, off = Chinese), Shift alone toggles as well. One state for every
+    /// Chinese or plain English typing: Shift alone toggles (the keys are set in Settings; Caps Lock,
+    /// if the person binds it, means its state: lock on = English). One state for every
     /// application, as with the system's input methods (a controller exists per client).
     private static var asciiMode = false
     private static var capsLockOn = false
@@ -180,19 +180,12 @@ class TypingInputController: IMKInputController {
             recentText = ""
             return false
         }
-        var character = event.characters?.count == 1 ? event.characters?.first : nil
-        // With the lock on, the keyboard reports capitals; the person means ordinary letters
-        // (pinyin, or English in English mode) and capitals only with Shift.
-        let lockedLetter = event.modifierFlags.contains(.capsLock) && character.map { $0.isASCII && $0.isLetter } == true
-        if lockedLetter, let letter = character {
-            character = event.modifierFlags.contains(.shift) ? Character(letter.uppercased()) : Character(letter.lowercased())
-        }
+        // Caps Lock is the capitals lock, as in other third-party input methods: with it on the
+        // keyboard reports capitals, and capitals go into the text as they are (not as pinyin).
+        let character = event.characters?.count == 1 ? event.characters?.first : nil
         if Self.asciiMode {
             trackEnglish(event, character: character, client: client)
-            guard lockedLetter, let letter = character else { return false }
-            client.insertText(String(letter), replacementRange: Self.noReplacement)
-            remember(String(letter))
-            return true
+            return false
         }
         // Lowercase letters are pinyin; capitals typed while composing stay as they are (对PC行业 from duiPChangye).
         if let character, character.isASCII, character.isLowercase || (session.isComposing && character.isUppercase) {

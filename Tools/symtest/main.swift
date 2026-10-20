@@ -139,17 +139,16 @@ type(".");                       check("mid-text x|y: 。 goes in at the cursor"
 type("..");                      check("。。", text: "。。", cursor: 2)
 type("."); key(" ", code: SPACE); check("。 then space → 。 and a space", text: "。 ", cursor: 2)
 type("."); key("\r", code: 36);  check("。 then Return goes to the application", text: "。", cursor: 1)
-// Caps Lock: lock on = English (letters lowercase, capitals with Shift), lock off = Chinese again.
-flags(57, [.capsLock]); lockedKey("A", code: 0); lockedKey("a", code: 0, shift: true); lockedKey("B", code: 11)
-check("lock on: a, Shift-a, b → aAb typed as English", text: "aAb", cursor: 3)
-flags(57, [.capsLock]); lockedKey("A", code: 0)
+// Caps Lock is the capitals lock, as in other third-party input methods: with it on, capitals go
+// into the text as they are and nothing is composed; the language does not change.
+flags(57, [.capsLock]); lockedKey("A", code: 0); lockedKey("A", code: 0, shift: true); lockedKey("B", code: 11)
 do {
-    let ok = client.marked == nil && client.text as String == "a"
-    print((ok ? "ok   " : "FAIL ") + "lock still on after an unchanged flags event: English stays (a typed, no composition)"); if !ok { failures += 1 }
+    let ok = client.marked == nil && client.text as String == "AAB"
+    print((ok ? "ok   " : "FAIL ") + "lock on: a, Shift-a, b → AAB typed as they are: \"\(client.text)\""); if !ok { failures += 1 }
 }
 client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 flags(57, []); key("a", code: 0)
-print((client.marked != nil ? "ok   " : "FAIL ") + "lock off: a composes pinyin again"); if client.marked == nil { failures += 1 }
+print((client.marked != nil ? "ok   " : "FAIL ") + "lock off: a composes pinyin (still Chinese)"); if client.marked == nil { failures += 1 }
 key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 // Shortcut settings: Shift alone toggles English by default; with its bindings removed it does not,
 // and a key the person bound (Control-Space) does.
@@ -170,10 +169,25 @@ keyMods(" ", code: 49, [.control]); key("a", code: 0)
 print((client.marked == nil && client.text as String == "a" ? "ok   " : "FAIL ") + "Control-Space bound → English"); if !(client.marked == nil && client.text as String == "a") { failures += 1 }
 keyMods(" ", code: 49, [.control]); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 ShortcutStore.shared.resetDefaults()
-for binding in ShortcutStore.shared.bindings[.toggleLanguage] ?? [] where binding.keyCode == 57 { ShortcutStore.shared.remove(binding, from: .toggleLanguage) }
-flags(57, [.capsLock]); key("a", code: 0)
-print((client.marked != nil ? "ok   " : "FAIL ") + "Caps Lock with its binding removed → still Chinese"); if client.marked == nil { failures += 1 }
-key("", code: ESC); flags(57, []); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+// Settings saved when Caps Lock switched by default: once, Caps Lock is taken off the switch and,
+// with nothing left on it, Shift comes back.
+do {
+    let saved = #"{"toggleLanguage":[{"label":"Caps Lock","modifiers":0,"alone":true,"keyCode":57}]}"#
+    UserDefaults.standard.set(Data(saved.utf8), forKey: "ShortcutBindings")
+    UserDefaults.standard.removeObject(forKey: "CapsLockIsCapitalsLock")
+    let codes = (ShortcutStore().bindings[.toggleLanguage] ?? []).map(\.keyCode).sorted()
+    let ok = codes == [56, 60]
+    print((ok ? "ok   " : "FAIL ") + "saved Caps Lock-only switch becomes left and right Shift: \(codes)"); if !ok { failures += 1 }
+    UserDefaults.standard.removeObject(forKey: "ShortcutBindings")
+}
+// Caps Lock bound to the switch in Settings: lock on = English (capitals as typed), off = Chinese.
+ShortcutStore.shared.add(KeyBinding(keyCode: 57, modifiers: 0, alone: true, label: "Caps Lock"), to: .toggleLanguage)
+flags(57, [.capsLock]); lockedKey("A", code: 0)
+print((client.marked == nil && client.text as String == "A" ? "ok   " : "FAIL ") + "Caps Lock bound: lock on → English"); if !(client.marked == nil && client.text as String == "A") { failures += 1 }
+client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+flags(57, []); key("a", code: 0)
+print((client.marked != nil ? "ok   " : "FAIL ") + "Caps Lock bound: lock off → Chinese"); if client.marked == nil { failures += 1 }
+key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 ShortcutStore.shared.resetDefaults()
 // Arrow keys cross page boundaries: → past the 9th candidate goes to the next page, ← back.
 if let decoder = EngineHost.decoder {
@@ -234,6 +248,15 @@ key("{", code: 33, shift: true); key("}", code: 30, shift: true); check("{ } →
 key("|", code: 42, shift: true); check("| → ｜", text: "｜", cursor: 1)
 key("`", code: 50); key("3", code: 20); check("` then 3 → ·3", text: "·3", cursor: 2)
 // - and = turn the pages; on the first page - sends the letters as typed and itself (ai-).
+// Marks typed by their names come right after the name, never first: yinhao → 引号 「」 『』 …
+if let decoder = EngineHost.decoder {
+    for context in ["", "请输入"] {
+        let offered = decoder.decode("yinhao", precedingText: context).refined().candidates.map(\.text)
+        let name = offered.firstIndex(of: "引号"), mark = offered.firstIndex(of: "「」")
+        let ok = offered.first == "引号" && name != nil && mark == name! + 1
+        print((ok ? "ok   " : "FAIL ") + "yinhao after \"\(context)\": 引号 first, 「」 right after it (\(offered.prefix(4).joined(separator: " ")))"); if !ok { failures += 1 }
+    }
+}
 // Characters no font on this Mac draws are not offered (they would show as a box); the rare
 // characters it draws still are, in full lists of a syllable.
 if let decoder = EngineHost.lexiconDecoder, let lexicon = try? Lexicon(path: "Resources/lexicon.sqlite") {
