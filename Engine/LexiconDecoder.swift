@@ -51,6 +51,9 @@ public final class LexiconDecoder: CandidateDecoding {
     /// readings even when the English table lacks them (at the table's rarest frequency; learning
     /// decides how far they rise).
     public var typedEnglish: ((String) -> [String])?
+    /// Whether this Mac can draw a text (fonts differ between macOS versions): characters from CJK
+    /// extension B on that no font has are not offered, as they would show as a box. nil: no check.
+    public var canShow: ((String) -> Bool)?
     /// Keys (letters only) whose learned order the person deleted: typed alone they keep the
     /// general order until the next kept learning session.
     public var heldKeys: ((String) -> Bool)?
@@ -103,7 +106,7 @@ public final class LexiconDecoder: CandidateDecoding {
     private var allCharactersCache: [String: [Candidate]] = [:]
     private func allCharacters(_ syllable: String, consumed: Int) -> [Candidate] {
         if let cached = allCharactersCache[syllable], cached.first?.consumed == consumed { return cached }
-        let list = timedLexicon({ lexicon.characters(syllable) }).map {
+        let list = timedLexicon({ lexicon.characters(syllable) }).filter { showable($0.word) }.map {
             Candidate(text: $0.word, consumed: consumed, words: [WordRef(text: $0.word, wid: $0.wid, key: $0.key)], score: $0.logp)
         }
         if allCharactersCache.count > 512 { allCharactersCache.removeAll() }
@@ -234,7 +237,7 @@ public final class LexiconDecoder: CandidateDecoding {
         let held = heldKeys?(input.filter(\.isLetter).lowercased()) ?? false
         if deferRerank, scorer != nil, sentences.count > 1 {
             // Show the lattice's reading at once; the model's say arrives as the second look.
-            var quick = chinesePriority(chosen.result)
+            var quick = finish(chosen.result)
             let quickTexts = quick.candidates.map(\.text)
             let finalSentences = sentences
             // The second look runs off the main thread without the decoder's lock, so it works on
@@ -242,14 +245,14 @@ public final class LexiconDecoder: CandidateDecoding {
             let (model, base, learned) = (scorer, held ? nil : baseScorer, learnedWords)
             quick.refine = { [self] isCancelled in
                 if isCancelled() { return nil }
-                var better = self.chinesePriority(self.rerank(chosen.result, sentences: finalSentences, precedingText: precedingText, scorer: model, base: base, learned: learned))
+                var better = self.finish(self.rerank(chosen.result, sentences: finalSentences, precedingText: precedingText, scorer: model, base: base, learned: learned))
                 if better.candidates.map(\.text) == quickTexts { return nil }  // nothing to update
                 better.refine = nil
                 return better
             }
             return quick
         }
-        return chinesePriority(rerank(chosen.result, sentences: sentences, precedingText: precedingText, scorer: scorer, base: held ? nil : baseScorer, learned: learnedWords))
+        return finish(rerank(chosen.result, sentences: sentences, precedingText: precedingText, scorer: scorer, base: held ? nil : baseScorer, learned: learnedWords))
     }
 
     /// Text before the cursor that is worth conditioning on: its last characters, when Chinese.
@@ -321,6 +324,20 @@ public final class LexiconDecoder: CandidateDecoding {
             !leaders.contains { $0.text == candidate.text && $0.consumed == candidate.consumed }
         }
         return reranked
+    }
+
+    /// Characters below U+20000 (the basic block and extension A) are drawn by every macOS this runs on.
+    private func showable(_ text: String) -> Bool {
+        guard let canShow, text.unicodeScalars.contains(where: { $0.value >= 0x20000 }) else { return true }
+        return canShow(text)
+    }
+
+    /// The result as offered: what this Mac cannot draw left out, Chinese before English.
+    private func finish(_ result: DecodeResult) -> DecodeResult {
+        guard canShow != nil, result.candidates.contains(where: { !showable($0.text) }) else { return chinesePriority(result) }
+        var shown = result
+        shown.candidates = result.candidates.filter { showable($0.text) }
+        return chinesePriority(shown)
     }
 
     /// Moves the best Chinese word in front of English-containing readings of the same length. Only a

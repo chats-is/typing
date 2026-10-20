@@ -26,6 +26,8 @@ enum EngineHost {
                 decoder.heldKeys = Learning.heldKeysFilter()
                 // English words the person has written are offered even when the table lacks them.
                 decoder.typedEnglish = { Learning.enabled ? Learning.store.typedEnglish($0) : [] }
+                // Characters no font on this Mac has are not offered (they would show as a box).
+                decoder.canShow = CandidatePanel.canShow
                 return decoder
             } catch {
                 NSLog("Typing: cannot open lexicon: \(error)")

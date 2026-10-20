@@ -93,7 +93,12 @@ public final class Lexicon {
         }
         sqlite3_prepare_v2(db, "\(columns) INDEXED BY idx_n_key WHERE n = ?1 AND key >= ?2 AND key < ?3 AND key GLOB ?4 ORDER BY logp DESC LIMIT \(Lexicon.abbreviationLimit)", -1, &leadingStmt, nil)
         sqlite3_prepare_v2(db, "SELECT word, 0, key, logp FROM english WHERE key = ?1 ORDER BY logp DESC LIMIT 8", -1, &englishStmt, nil)
-        sqlite3_prepare_v2(db, "\(columns) WHERE key = ?1 AND n = 1 ORDER BY logp DESC", -1, &charactersStmt, nil)
+        // The rare characters live in a table of their own (lexicons built before it have none).
+        if sqlite3_prepare_v2(db, "SELECT word, wid, key, logp FROM lexicon WHERE key = ?1 AND n = 1 UNION ALL SELECT word, 0, key, logp FROM rare_characters WHERE key = ?1 ORDER BY 4 DESC", -1, &charactersStmt, nil) != SQLITE_OK {
+            sqlite3_finalize(charactersStmt)
+            charactersStmt = nil
+            sqlite3_prepare_v2(db, "\(columns) WHERE key = ?1 AND n = 1 ORDER BY logp DESC", -1, &charactersStmt, nil)
+        }
         var floor: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT MIN(logp) FROM english", -1, &floor, nil) == SQLITE_OK, sqlite3_step(floor) == SQLITE_ROW {
             englishFloor = sqlite3_column_double(floor, 0)

@@ -12,8 +12,7 @@ class TypingInputController: IMKInputController {
         ",": "，", ".": "。", "?": "？", "!": "！", ":": "：", ";": "；",
         "(": "（", ")": "）", "<": "《", ">": "》", "[": "【", "]": "】",
         "\\": "、", "^": "……", "_": "——", "$": "￥", "~": "～",
-        // The rest of GB/T 19246-2003 table 1 (- and = stay as typed: dates, numbers, ai-).
-        "`": "．", "{": "〔", "}": "〕", "|": "·",
+        "`": "·", "{": "「", "}": "」", "|": "｜",
     ]
 
     private let session: InputSession = {
@@ -39,20 +38,6 @@ class TypingInputController: IMKInputController {
     /// LearningStore.isEnglishWord).
     private var englishToken = ""
     private var englishContext = ""
-    /// A mark just typed (already in the text) with its alternative, the key's own character, as
-    /// candidates 1 and 2 in the panel; a digit or Tab swaps the alternative in place.
-    private var symbol: (candidates: [String], choice: Int)?
-    /// While the symbol panel is up, looks at the text now and then: the application may have
-    /// taken the text away without a key reaching the input method (Return sending a message,
-    /// a click on a button), and then the panel must go too. It also closes the panel when no key
-    /// has come for `symbolFinishDelay`.
-    private var symbolWatch: Timer?
-    private var symbolShownAt = Date.distantPast
-    /// A mark usually ends what is being typed: left alone, its panel closes by itself. Typing on
-    /// closes it at once, so this only matters when the person stops to look at the panel.
-    static let symbolFinishDelay: TimeInterval = 2
-    /// For tests: whether the symbol panel is up.
-    var symbolPanelShown: Bool { symbol != nil }
 
     private static let recentTextLength = 60
 
@@ -93,7 +78,7 @@ class TypingInputController: IMKInputController {
             return false
         case .keyDown:
             // (keyCode is only defined for key events.)
-            if event.keyCode == Key.delete, !session.isComposing, symbol == nil { Learning.noteDelete() }
+            if event.keyCode == Key.delete, !session.isComposing { Learning.noteDelete() }
             modifierPressedAlone = nil
             let wasDigit = lastKeyWasDigit
             lastKeyWasDigit = false
@@ -137,15 +122,10 @@ class TypingInputController: IMKInputController {
         }
     }
 
-    deinit {
-        symbolWatch?.invalidate()
-    }
-
     override func deactivateServer(_ sender: Any!) {
         finishEnglishToken()
         if let client = sender as? IMKTextInput { commitRaw(client) }
         recentText = ""
-        dismissSymbol()
         super.deactivateServer(sender)
     }
 
@@ -214,9 +194,6 @@ class TypingInputController: IMKInputController {
             remember(String(letter))
             return true
         }
-        if symbol != nil, let handled = handleSymbolKey(event, character: character, client: client) {
-            return handled
-        }
         // Lowercase letters are pinyin; capitals typed while composing stay as they are (对PC行业 from duiPChangye).
         if let character, character.isASCII, character.isLowercase || (session.isComposing && character.isUppercase) {
             if !session.isComposing {
@@ -229,6 +206,11 @@ class TypingInputController: IMKInputController {
             highlight = 0
             updateUI(client)
             return true
+        }
+        // Deleting a quote just typed: the next quote key types the same one again (“ stays “).
+        if !session.isComposing, event.keyCode == Key.delete, let last = recentText.last {
+            if last == "\u{201C}" || last == "\u{201D}" { doubleQuoteOpen.toggle() }
+            if last == "\u{2018}" || last == "\u{2019}" { singleQuoteOpen.toggle() }
         }
         return session.isComposing
             ? handleComposingKey(event, character: character, client: client)
@@ -261,7 +243,7 @@ class TypingInputController: IMKInputController {
             remember(String(character))
             return false
         }
-        composeSymbol(text, typed: character, client: client)
+        insertMark(text, client: client)
         return true
     }
 
@@ -313,12 +295,16 @@ class TypingInputController: IMKInputController {
             page = 0
             highlight = 0
             updateUI(client)
-        case "-", "=":
-            // Pages turn with the arrows only, so keys that type something stay typable: the
-            // letters go out as typed and the mark follows (ai- → "ai-", a=b).
+        case "-" where page > 0:
+            turnPage(-1, pageCount: pageCount, client: client)
+        case "-":
+            // On the first page there is nothing to turn back to: the letters go out as typed and
+            // the hyphen follows (ai- → "ai-").
             sendLetters(client)
-            remember(String(character))
+            remember("-")
             return false
+        case "=":
+            turnPage(1, pageCount: pageCount, client: client)
         case "1"..."9":
             let index = Int(character.asciiValue! - UInt8(ascii: "1"))
             if index < onPage { select(page * Self.pageSize + index, client: client) }
@@ -339,7 +325,7 @@ class TypingInputController: IMKInputController {
                 recentText = ""
                 return false
             }
-            composeSymbol(text, typed: character, client: client)
+            insertMark(text, client: client)
         }
         return true
     }
@@ -357,99 +343,16 @@ class TypingInputController: IMKInputController {
         }
     }
 
-    // MARK: - Symbols
+    // MARK: - Marks
 
-    /// A mark that was just typed, with its alternative (the key's own character). The mark goes
-    /// into the text at once, so Return right after it sends at once; while the panel is up, the
-    /// alternative's number or Tab swaps it in place. (As marked text, applications such as a
-    /// browser or a terminal took the Return that committed it for that alone, and sending took
-    /// a second Return.)
-    private func composeSymbol(_ text: String, typed character: Character, client: IMKTextInput) {
-        let other = String(character)
+    /// A punctuation key in Chinese mode: its Chinese mark goes into the text, as the system's
+    /// Pinyin types it. (A panel offering the key's own character as well was tried and dropped
+    /// on 2026-10-20: swapping a mark already in the text needs the application to report and
+    /// replace its text, which a terminal does not; English marks come from English mode.)
+    private func insertMark(_ text: String, client: IMKTextInput) {
         client.insertText(text, replacementRange: Self.noReplacement)
         remember(text)
-        guard other != text else { return }
-        symbol = ([text, other], 0)
-        Self.panel.show(candidates: [text, other], highlighted: 0, hasMore: false, near: caretRect(client))
-        symbolShownAt = Date()
-        symbolWatch?.invalidate()
-        symbolWatch = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            guard Date().timeIntervalSince(self.symbolShownAt) < Self.symbolFinishDelay,
-                  let client = self.client(), self.symbolInPlace(client) else { self.dismissSymbol(); return }
-        }
     }
-    /// Whether the mark is still right in front of the cursor (where a number or Tab could swap it).
-    private func symbolInPlace(_ client: IMKTextInput) -> Bool {
-        guard let current = symbol else { return false }
-        let mark = current.candidates[current.choice]
-        let selection = client.selectedRange()
-        let length = mark.utf16.count
-        guard selection.location != NSNotFound, selection.length == 0, selection.location >= length else { return false }
-        return client.attributedSubstring(from: NSRange(location: selection.location - length, length: length))?.string == mark
-    }
-    private func handleSymbolKey(_ event: NSEvent, character: Character?, client: IMKTextInput) -> Bool? {
-        guard let current = symbol else { return nil }
-        let count = current.candidates.count
-        switch event.keyCode {
-        case Key.tab:
-            let step = event.modifierFlags.contains(.shift) ? count - 1 : 1
-            swapSymbol(to: (current.choice + step) % count, client: client)
-            Self.panel.show(candidates: current.candidates, highlighted: symbol?.choice ?? 0, hasMore: false, near: caretRect(client))
-            symbolShownAt = Date()
-            return true
-        case Key.escape, Key.space:
-            // Space confirms the mark as it is (as it confirms a candidate) and types no space.
-            dismissSymbol()
-            return true
-        case Key.delete:
-            // The mark goes with the key; a quote's open/close state is as before it was typed.
-            let mark = current.candidates[current.choice]
-            if Self.isDoubleQuote(mark) { doubleQuoteOpen.toggle() }
-            if Self.isSingleQuote(mark) { singleQuoteOpen.toggle() }
-            recentText = String(recentText.dropLast(mark.count))
-            dismissSymbol()
-            return false
-        default:
-            break
-        }
-        if let character, let digit = character.wholeNumberValue, digit >= 1, digit <= count {
-            swapSymbol(to: digit - 1, client: client)
-            dismissSymbol()
-            return true
-        }
-        // Any other key is typed as usual: the mark stays, the panel closes, the cursor moves freely.
-        dismissSymbol()
-        return nil
-    }
-    /// Replaces the mark in the text with the candidate at `choice`. The mark's place is read
-    /// from the client now (the insertion has landed by the time the next key arrives) and the
-    /// swap is made only when the mark is really there, in front of the cursor.
-    private func swapSymbol(to choice: Int, client: IMKTextInput) {
-        guard var current = symbol, choice != current.choice else { return }
-        let from = current.candidates[current.choice], to = current.candidates[choice]
-        let selection = client.selectedRange()
-        let length = from.utf16.count
-        guard selection.location != NSNotFound, selection.length == 0, selection.location >= length else { return }
-        let range = NSRange(location: selection.location - length, length: length)
-        guard client.attributedSubstring(from: range)?.string == from else { return }
-        client.insertText(to, replacementRange: range)
-        // The Chinese quotes' open/close state follows what is in the text.
-        if Self.isDoubleQuote(from) != Self.isDoubleQuote(to) { doubleQuoteOpen.toggle() }
-        if Self.isSingleQuote(from) != Self.isSingleQuote(to) { singleQuoteOpen.toggle() }
-        recentText = String(recentText.dropLast(from.count)) + to
-        current.choice = choice
-        symbol = current
-    }
-    private func dismissSymbol() {
-        symbolWatch?.invalidate()
-        symbolWatch = nil
-        guard symbol != nil else { return }
-        symbol = nil
-        Self.panel.hide()
-    }
-    private static func isDoubleQuote(_ text: String) -> Bool { text == "\u{201C}" || text == "\u{201D}" }
-    private static func isSingleQuote(_ text: String) -> Bool { text == "\u{2018}" || text == "\u{2019}" }
 
     // MARK: - Composition
 
@@ -501,10 +404,9 @@ class TypingInputController: IMKInputController {
         }
     }
 
-    /// Commits whatever is being composed as shown: a mark, or the candidates picked so far plus
-    /// the unconverted letters as typed, "'" included.
+    /// Commits whatever is being composed as shown: the candidates picked so far plus the
+    /// unconverted letters as typed, "'" included.
     private func commitRaw(_ client: IMKTextInput) {
-        dismissSymbol()
         guard session.isComposing else { return }
         let text = session.typedText
         session.reset()

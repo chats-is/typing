@@ -14,6 +14,7 @@ Tables:
                                                abbr: first letters
   syllables(s)                                 every full syllable
   english(key, word, logp)                     key: the lowercase word; word: as it is written
+  rare_characters(key, word, logp)             characters only the full list of a lone syllable shows
 """
 import json
 import math
@@ -121,8 +122,9 @@ def main():
     print(f"{added} characters added from pypinyin")
     # Every Chinese character with a reading must be typeable (GB/T 19246-2003 4.2: the whole GB 18030
     # set): the characters pypinyin reads that neither the readings table nor the model's vocabulary
-    # has, at the same small rate. Their word ids come after all others (see below), so the ids of
-    # the words the bigram model was counted on stay as they were.
+    # has, at the same small rate. They go into a table of their own, rare_characters, which only
+    # the full list of a syllable typed alone reads: in the lexicon table they made every prefix and
+    # initials lookup scan tens of thousands of extra rows (typing was 5-25% slower).
     # Only readings of the syllables already known (those of 《汉语拼音方案》, 4.3.3): dialect readings
     # (din, wong) and interjections (m, ng) would make single letters and common runs whole syllables.
     known_syllables = {r for readings in by_char.values() for r, _ in readings}
@@ -145,6 +147,7 @@ def main():
             read_e_circumflex += 1
     print(f"{read_e_circumflex} characters read ê, typed ea")
     chars = 0
+    rare_entries = {}
     for char, readings in by_char.items():
         everyday = counts.get(char, 0.0) + (0.5 if char in reading_use or counts.get(char, 0.0) > 0 else 0.05)
         use = reading_use.get(char, {})
@@ -155,7 +158,8 @@ def main():
                 share = max(use.get(reading, 0.0) / total, 0.002)  # a reading no word uses is rare, not absent
             else:
                 share = 1.0 / len(readings)
-            entries[(reading, char)] = max(entries.get((reading, char), 0.0), everyday * share)
+            target = rare_entries if char in rare_chars else entries
+            target[(reading, char)] = max(target.get((reading, char), 0.0), everyday * share)
             chars += 1
     print(f"{chars:,} character readings")
 
@@ -202,10 +206,8 @@ def main():
 
     total = sum(entries.values()) + sum(rate for written in english.values() for _, rate in written)
     english_rows = [(lower, form, math.log(rate / total)) for lower, written in english.items() for form, rate in written]
+    rare_rows = sorted(((key, word, math.log(rate / total)) for (key, word), rate in rare_entries.items()), key=lambda r: (r[0], -r[2]))
     wids = {}
-    for _key, word in sorted(entries):
-        if word not in rare_chars:
-            wids.setdefault(word, len(wids) + 1)
     for _key, word in sorted(entries):
         wids.setdefault(word, len(wids) + 1)
     rows = sorted(
@@ -221,6 +223,9 @@ def main():
     db.execute("CREATE TABLE lexicon(key TEXT NOT NULL, n INTEGER NOT NULL, wid INTEGER NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL, abbr TEXT NOT NULL)")
     db.execute("CREATE TABLE syllables(s TEXT PRIMARY KEY) WITHOUT ROWID")
     db.execute("CREATE TABLE english(key TEXT NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL)")
+    db.execute("CREATE TABLE rare_characters(key TEXT NOT NULL, word TEXT NOT NULL, logp REAL NOT NULL)")
+    db.executemany("INSERT INTO rare_characters VALUES (?,?,?)", rare_rows)
+    db.execute("CREATE INDEX idx_rare ON rare_characters(key, logp DESC)")
     db.executemany("INSERT INTO lexicon VALUES (?,?,?,?,?,?)", rows)
     db.executemany("INSERT INTO syllables VALUES (?)", ((s,) for s in syllables))
     db.executemany("INSERT INTO english VALUES (?,?,?)", english_rows)
@@ -231,7 +236,7 @@ def main():
     db.commit()
     db.execute("VACUUM")
     db.close()
-    print(f"wrote {OUT}: {len(rows):,} rows, {len(syllables)} syllables, {os.path.getsize(OUT) / 1e6:.0f} MB")
+    print(f"wrote {OUT}: {len(rows):,} rows, {len(rare_rows):,} rare characters' readings, {len(syllables)} syllables, {os.path.getsize(OUT) / 1e6:.0f} MB")
 
 
 if __name__ == "__main__":

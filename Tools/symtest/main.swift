@@ -123,58 +123,22 @@ func check(_ name: String, text: String, cursor: Int) {
     client.text = NSMutableString(); client.cursor = 0; client.marked = nil; client.log = []
 }
 
-type(".2");                      check("。 then 2 → .", text: ".", cursor: 1)
-type(".1");                      check("。 then 1 → 。", text: "。", cursor: 1)
-type("."); key("", code: LEFT);  check("。 then ← moves at once", text: "。", cursor: 0)
+// In Chinese mode a punctuation key types its Chinese mark at once, and every key after it is
+// typed as usual (no panel: the marks are as the system's Pinyin types them).
+type(".2");                      check("。 then 2 → 。2", text: "。2", cursor: 2)
+type("."); key("", code: LEFT);  check("。 then ← moves the cursor", text: "。", cursor: 0)
 let firstX = EngineHost.decoder?.decode("x", precedingText: "").refined().candidates.first?.text ?? "x"
 type("."); key("", code: LEFT); key("x", code: 7); key("", code: SPACE)
                                  check("。 ← then pinyin x + space lands before the mark (\(firstX)。)", text: firstX + "。", cursor: firstX.count)
-type(","); key("\t", code: TAB); check(", then Tab → ,", text: ",", cursor: 1)
-type(","); key("\t", code: TAB); key("\t", code: TAB); check(", Tab Tab → ，", text: "，", cursor: 1)
 type(":"); key("", code: DEL);   check("： then delete → empty", text: "", cursor: 0)
-type("\"2\"");                   check("“ 2 “ → \" then “ again (quote state restored)", text: "\"“", cursor: 2)
+type("\"2\"");                   check("“ 2 ” around a digit", text: "“2”", cursor: 3)
 type("\"\"");                    check("“ then ” pair", text: "“”", cursor: 2)
 type("\""); key("", code: DEL); type("\"");  check("“ delete “ → “ again", text: "“", cursor: 1)
 client.text = NSMutableString(string: "xy"); client.cursor = 1
-type(".2");                      check("mid-text x|y: 。 2 → x.y", text: "x.y", cursor: 2)
-type(".2."); key("", code: ESC); check(". then 。 (Esc closes)", text: ".。", cursor: 2)
-type("..2");                     check("。。2 → 。.", text: "。.", cursor: 2)
-type("."); key("", code: RIGHT); key("2", code: 19); check("。 → then 2 is typed (panel closed by arrow)", text: "。2", cursor: 2)
-type(".3");                      check("。 then 3 (no third candidate) → 。3", text: "。3", cursor: 2)
-// The mark is in the text at once (Return right after it sends it, as before), with the panel up.
-type(".")
-do {
-    let ok = controller.symbolPanelShown && client.marked == nil && client.text as String == "。" && client.cursor == 1
-    print((ok ? "ok   " : "FAIL ") + "。 goes into the text at once, panel up"); if !ok { failures += 1 }
-}
-key("", code: ESC)
-do {
-    let ok = !controller.symbolPanelShown && client.text as String == "。"
-    print((ok ? "ok   " : "FAIL ") + "Esc closes the panel and keeps the mark"); if !ok { failures += 1 }
-}
-client.text = NSMutableString(); client.cursor = 0; client.marked = nil
-type("."); key(" ", code: SPACE)
-do {
-    let ok = !controller.symbolPanelShown && client.text as String == "。" && client.cursor == 1
-    print((ok ? "ok   " : "FAIL ") + "Space confirms the mark and types no space"); if !ok { failures += 1 }
-}
-client.text = NSMutableString(); client.cursor = 0; client.marked = nil
-// The panel closes by itself when the application takes the text away (Return sent it, a button
-// was clicked), and when no key comes for a while.
-type("."); RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
-print((controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel stays while the mark is in place"); if !controller.symbolPanelShown { failures += 1 }
-client.text = NSMutableString(); client.cursor = 0
-RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
-print((!controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel closes after the application cleared the text"); if controller.symbolPanelShown { failures += 1 }
-type(","); RunLoop.main.run(until: Date(timeIntervalSinceNow: TypingInputController.symbolFinishDelay + 0.5))
-do {
-    let ok = !controller.symbolPanelShown && client.text as String == "，"
-    print((ok ? "ok   " : "FAIL ") + "with no key the panel closes by itself, mark kept"); if !ok { failures += 1 }
-}
-client.text = NSMutableString(); client.cursor = 0; client.marked = nil
-type("."); key("\r", code: 36)
-print((!controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel closes on Return"); if controller.symbolPanelShown { failures += 1 }
-check("Return went to the application, mark kept", text: "。", cursor: 1)
+type(".");                       check("mid-text x|y: 。 goes in at the cursor", text: "x。y", cursor: 2)
+type("..");                      check("。。", text: "。。", cursor: 2)
+type("."); key(" ", code: SPACE); check("。 then space → 。 and a space", text: "。 ", cursor: 2)
+type("."); key("\r", code: 36);  check("。 then Return goes to the application", text: "。", cursor: 1)
 // Caps Lock: lock on = English (letters lowercase, capitals with Shift), lock off = Chinese again.
 flags(57, [.capsLock]); lockedKey("A", code: 0); lockedKey("a", code: 0, shift: true); lockedKey("B", code: 11)
 check("lock on: a, Shift-a, b → aAb typed as English", text: "aAb", cursor: 3)
@@ -264,13 +228,41 @@ if let decoder = EngineHost.decoder {
     } else { print("skip: no candidate for the front alone on the first page of xi'an") }
 }
 // The marks of GB/T 19246-2003 table 1 that were missing; Tab still gives the key's own character.
-key("`", code: 50); check("` → ．", text: "．", cursor: 1)
-key("{", code: 33, shift: true); key("}", code: 30, shift: true); check("{ } → 〔〕", text: "〔〕", cursor: 2)
-key("|", code: 42, shift: true); check("| → ·", text: "·", cursor: 1)
-key("|", code: 42, shift: true); key("\t", code: TAB); check("| then Tab → |", text: "|", cursor: 1)
-type("ai"); key("-", code: 27); check("ai, - → letters as typed and - (pages turn with the arrows only)", text: "ai-", cursor: 3)
-type("a"); key("=", code: 24); check("a, = → letters as typed and =", text: "a=", cursor: 2)
-type("ni"); key("", code: 125); key("-", code: 27); check("ni, ↓, - → letters as typed and - on any page", text: "ni-", cursor: 3)
+// The marks of GB/T 19246-2003 table 1 that were missing, as the system's Pinyin types them.
+key("`", code: 50); check("` → ·", text: "·", cursor: 1)
+key("{", code: 33, shift: true); key("}", code: 30, shift: true); check("{ } → 「」", text: "「」", cursor: 2)
+key("|", code: 42, shift: true); check("| → ｜", text: "｜", cursor: 1)
+key("`", code: 50); key("3", code: 20); check("` then 3 → ·3", text: "·3", cursor: 2)
+// - and = turn the pages; on the first page - sends the letters as typed and itself (ai-).
+// Characters no font on this Mac draws are not offered (they would show as a box); the rare
+// characters it draws still are, in full lists of a syllable.
+if let decoder = EngineHost.lexiconDecoder, let lexicon = try? Lexicon(path: "Resources/lexicon.sqlite") {
+    func beyondExtensionA(_ text: String) -> Bool { text.unicodeScalars.contains { $0.value >= 0x20000 } }
+    var drawable: (String, String)?, undrawable: (String, String)?
+    for syllable in lexicon.syllables.sorted() where drawable == nil || undrawable == nil {
+        for entry in lexicon.characters(syllable) where beyondExtensionA(entry.word) {
+            if CandidatePanel.canShow(entry.word) { drawable = drawable ?? (syllable, entry.word) } else { undrawable = undrawable ?? (syllable, entry.word) }
+        }
+    }
+    decoder.canShow = CandidatePanel.canShow
+    if let (syllable, word) = drawable {
+        let offered = decoder.decode(syllable, precedingText: "").refined().candidates.map(\.text)
+        let ok = offered.contains(word)
+        print((ok ? "ok   " : "FAIL ") + "\(syllable): \(word), which this Mac draws, is offered"); if !ok { failures += 1 }
+    }
+    if let (syllable, word) = undrawable {
+        let offered = decoder.decode(syllable, precedingText: "").refined().candidates.map(\.text)
+        let boxes = offered.filter { !CandidatePanel.canShow($0) }
+        let ok = !offered.contains(word) && boxes.isEmpty
+        print((ok ? "ok   " : "FAIL ") + "\(syllable): nothing this Mac cannot draw is offered (\(word) left out)"); if !ok { failures += 1 }
+    }
+    decoder.canShow = nil
+}
+type("ai"); key("-", code: 27); check("ai, - on the first page → letters as typed and -", text: "ai-", cursor: 3)
+if let candidates = EngineHost.decoder?.decode("ni", precedingText: "").refined().candidates.map(\.text), candidates.count > 10 {
+    type("ni"); key("=", code: 24); key(" ", code: SPACE); check("ni, = → second page, space → \(candidates[9])", text: candidates[9], cursor: candidates[9].count)
+    type("ni"); key("=", code: 24); key("-", code: 27); key(" ", code: SPACE); check("ni, =, - → back on the first page, space → \(candidates[0])", text: candidates[0], cursor: candidates[0].count)
+}
 flags(56, [.shift]); keyMods("A", code: 0, [.shift]); flags(56, []); key("", code: SPACE)
 let shiftTyped = client.text as String
 print((!shiftTyped.isEmpty && (client.text as String) != "" ? "ok   " : "FAIL ") + "Shift held for a capital → no toggle (text \(shiftTyped))"); client.text = NSMutableString(); client.cursor = 0; client.marked = nil

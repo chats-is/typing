@@ -11,6 +11,26 @@ final class CandidatePanel: NSPanel {
 
     private static let font = NSFont.systemFont(ofSize: 16)
     private static let indexFont = NSFont.systemFont(ofSize: 12)
+
+    /// Whether some font on this Mac draws the text, found the way the panel finds one (the system
+    /// font's fallback); a character none has would show as a box. Answers are kept: one look each.
+    static func canShow(_ text: String) -> Bool {
+        shownLock.lock(); defer { shownLock.unlock() }
+        if let known = shown[text] { return known }
+        let length = (text as NSString).length
+        let fallback = CTFontCreateForString(font as CTFont, text as CFString, CFRange(location: 0, length: length))
+        let units = Array(text.utf16)
+        var glyphs = [CGGlyph](repeating: 0, count: length)
+        // A character written as two UTF-16 units (extension B on) gets its glyph in the first slot
+        // and 0 in the second: only the first unit of each character is looked at.
+        let drawn = !(CTFontCopyPostScriptName(fallback) as String).hasPrefix("LastResort")
+            && CTFontGetGlyphsForCharacters(fallback, units, &glyphs, length)
+            && !zip(units, glyphs).contains { !UTF16.isTrailSurrogate($0.0) && $0.1 == 0 }
+        shown[text] = drawn
+        return drawn
+    }
+    private static var shown: [String: Bool] = [:]
+    private static let shownLock = NSLock()
     /// Lifts the smaller number so its middle sits at the middle of the candidate's characters
     /// (a Chinese character fills the em box; a digit stands on the baseline up to its cap height).
     private static let indexOffset: CGFloat = (font.ascender + font.descender) / 2 - indexFont.capHeight / 2
