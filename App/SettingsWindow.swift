@@ -75,6 +75,8 @@ final class LearningStatus: ObservableObject {
     @Published var page = 0
     /// The tag under the pointer, whose × shows fully.
     @Published var hovered: String?
+    /// Tags being deleted: each shows its own progress until the list without it has loaded.
+    @Published var removing: Set<String> = []
     /// Small enough that the page needs no scrolling at the window's default height.
     static let pageSize = 30
 
@@ -95,6 +97,7 @@ final class LearningStatus: ObservableObject {
                 guard generation == self.recordsGeneration else { return }  // a newer load is under way
                 self.records = found
                 self.loadingRecords = false
+                self.removing = self.removing.filter { !$0.hasPrefix("r:") }
                 self.clampPage()
             }
         }
@@ -102,8 +105,16 @@ final class LearningStatus: ObservableObject {
         Learning.requestLearnedChanges { found in
             self.changes = found.map { Change(id: $0.keys, keys: $0.keys, learned: $0.learned, general: $0.general) }
             self.loadingChanges = false
+            self.removing = self.removing.filter { !$0.hasPrefix("c:") }
             self.clampPage()
         }
+    }
+
+    /// Deletes a learned item; its tag shows the progress while the lists are read again.
+    func remove(_ tag: String, _ delete: () -> Void) {
+        removing.insert(tag)
+        delete()
+        refresh()
     }
 
     /// After a deletion the last page may be gone: show the last one there is.
@@ -140,16 +151,22 @@ struct Tag: View {
     @ObservedObject var status: LearningStatus
     let remove: () -> Void
     private var hovered: Bool { status.hovered == id }
+    private var removing: Bool { status.removing.contains(id) }
 
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
             if let detail { Text(detail).strikethrough(struck).foregroundStyle(.secondary) }
-            // The × always has its place at the trailing end, so nothing moves when it shows.
-            Button(action: remove) { Image(systemName: "xmark.circle.fill") }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
-                .opacity(hovered ? 1 : 0.25)
-                .frame(width: 16)
+            // The × always has its place at the trailing end, so nothing moves when it shows; while
+            // the tag is being deleted its progress takes that place.
+            if removing {
+                ProgressView().controlSize(.mini).frame(width: 16)
+            } else {
+                Button(action: remove) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .opacity(hovered ? 1 : 0.25)
+                    .frame(width: 16)
+            }
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Capsule().fill(hovered ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12)))
@@ -269,7 +286,7 @@ struct SettingsRootView: View {
                         TagFlow(spacing: 6) {
                             ForEach(rows[status.pageRange(rows.count)]) { change in
                                 Tag(id: "c:" + change.id, label: "\(change.keys) \(change.learned)", detail: change.general, struck: true, status: status) {
-                                    Learning.undo(keys: change.keys, word: change.learned); status.refresh()
+                                    status.remove("c:" + change.id) { Learning.undo(keys: change.keys, word: change.learned) }
                                 }
                             }
                         }
@@ -286,7 +303,7 @@ struct SettingsRootView: View {
                         TagFlow(spacing: 6) {
                             ForEach(rows[status.pageRange(rows.count)]) { record in
                                 Tag(id: "r:" + record.id, label: record.keys.isEmpty ? record.text : "\(record.keys) \(record.text)", detail: record.count > 1 ? "×\(record.count)" : nil, status: status) {
-                                    Learning.deleteEntries(times: [record.time]); status.refresh()
+                                    status.remove("r:" + record.id) { Learning.deleteEntries(times: [record.time]) }
                                 }
                             }
                         }
@@ -296,7 +313,8 @@ struct SettingsRootView: View {
             if status.pageCount > 1 || status.filteredCount > 0 {
                 HStack {
                     Text("共 \(status.filteredCount) 条").font(.callout).foregroundStyle(.secondary)
-                    if status.loading { ProgressView().controlSize(.small) }
+                    // A deletion shows its progress in its own tag.
+                    if status.loading && status.removing.isEmpty { ProgressView().controlSize(.small) }
                     Spacer()
                     Button { status.page -= 1 } label: { Image(systemName: "chevron.left") }.disabled(status.page == 0)
                     Text("\(status.page + 1) / \(status.pageCount)").font(.callout).monospacedDigit()

@@ -95,7 +95,14 @@ public final class LearningStore {
     public init(directory: URL = LearningStore.defaultDirectory()) {
         self.directory = directory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let merged = entriesLocked()
+        var merged = entriesLocked()
+        // Records written before redaction existed are redacted once, in place.
+        let redacted = Self.redacted(merged)
+        if redacted != merged {
+            rewriteLocked(redacted)
+            merged = entriesLocked()
+            if merged.count != redacted.count { rewriteLocked(merged) }  // inputs that became one
+        }
         count = merged.count
         identities = Set(merged.map(\.identity))
         if count > Self.maxEntries { rewriteLocked(Self.pruned(merged)) }
@@ -108,10 +115,14 @@ public final class LearningStore {
     /// Records a commit. It is held back for `undoWindow` seconds first: text deleted again right
     /// after being committed was not what the person wanted and is not learned.
     public func record(keys: String, text: String, context: String, undoWindow: TimeInterval = 3) {
-        guard !text.isEmpty, text.contains(where: { ("\u{4E00}"..."\u{9FFF}").contains($0) }) else { return }
+        // Nothing sensitive is stored: what follows a prompt for a password or a code is not
+        // recorded, and addresses and long numbers are taken out of the rest (Redaction).
+        guard !Redaction.asksForSecret(context) else { return }
+        let text = Redaction.redact(text), context = String(Redaction.redact(context).suffix(60))
+        guard Self.isRecordable(text) else { return }
         lock.lock(); defer { lock.unlock() }
         flushPendingLocked()
-        pending = Entry(time: Date().timeIntervalSince1970, keys: keys, text: text, context: String(context.suffix(60)))
+        pending = Entry(time: Date().timeIntervalSince1970, keys: keys, text: text, context: context)
         pendingDeadline = Date(timeIntervalSinceNow: undoWindow)
         pendingDeleted = 0
     }
@@ -150,6 +161,18 @@ public final class LearningStore {
             } else if rawLines - count > Self.compactAfterRepeats {
                 rewriteLocked(entriesLocked())
             }
+        }
+    }
+
+    /// Every entry with its text and contexts redacted; entries left with nothing worth recording
+    /// are dropped.
+    static func redacted(_ entries: [Entry]) -> [Entry] {
+        entries.compactMap { entry in
+            var e = entry
+            e.text = Redaction.redact(entry.text)
+            e.context = Redaction.redact(entry.context)
+            e.contexts = entry.contexts.map(Redaction.redact)
+            return isRecordable(e.text) ? e : nil
         }
     }
 
@@ -296,15 +319,41 @@ public final class LearningStore {
     // MARK: - What the person has written
 
     private var learnedCache: Set<String>?
+    private var englishCache: [String: [String]] = [:]
     private var learnedCacheCount = -1
     public static let learnedMaxLength = 4
 
-    /// Every run of 1 to 4 characters inside the texts the person has confirmed: the words whose
-    /// lone-word order learning may change. Words the person never wrote keep the general order.
+    /// What is worth recording: text with Chinese in it, or an English word.
+    static func isRecordable(_ text: String) -> Bool {
+        text.contains(where: { ("\u{4E00}"..."\u{9FFF}").contains($0) }) || isEnglishWord(text)
+    }
+
+    /// An English word as it is recorded: letters only, at least two, with an apostrophe or a
+    /// hyphen inside (don't, e-mail). Addresses, paths, commands, code and numbers are not words.
+    public static func isEnglishWord(_ text: String) -> Bool {
+        let parts = text.split(omittingEmptySubsequences: false) { $0 == "'" || $0 == "\u{2019}" || $0 == "-" }
+        return text.filter(\.isLetter).count >= 2 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isLetter } }
+    }
+
+    /// Every run of 1 to 4 characters inside the texts the person has confirmed, and each whole
+    /// text: the words whose lone-word order learning may change. Words the person never wrote
+    /// keep the general order.
     public func learnedStrings() -> Set<String> {
         lock.lock(); defer { lock.unlock() }
+        return learnedLocked()
+    }
+
+    /// English words the person has written with these letters (lowercase), as they wrote them.
+    public func typedEnglish(_ letters: String) -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        _ = learnedLocked()
+        return englishCache[letters] ?? []
+    }
+
+    private func learnedLocked() -> Set<String> {
         if let learnedCache, learnedCacheCount == count { return learnedCache }
         var set = Set<String>()
+        var english: [String: [String]] = [:]
         if let text = try? String(contentsOf: entriesURL, encoding: .utf8) {
             let decoder = JSONDecoder()
             for line in text.split(separator: "\n") {
@@ -315,9 +364,16 @@ public final class LearningStore {
                         set.insert(String(chars[i ..< i + n]))
                     }
                 }
+                set.insert(entry.text)
+                // Keyed by the letters typed for it (don't is typed dont).
+                let letters = entry.text.lowercased().filter(\.isLetter)
+                if Self.isEnglishWord(entry.text), !(english[letters]?.contains(entry.text) ?? false) {
+                    english[letters, default: []].append(entry.text)
+                }
             }
         }
         learnedCache = set
+        englishCache = english
         learnedCacheCount = count
         return set
     }

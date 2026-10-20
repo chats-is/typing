@@ -21,6 +21,7 @@ import os
 import sqlite3
 
 from pypinyin import Style, pinyin as to_pinyin
+from pypinyin.constants import PINYIN_DICT
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEXICONS = os.path.join(ROOT, "Data", "lexicons")
@@ -32,6 +33,9 @@ CASING = os.path.join(ROOT, "Data", "lexicon", "english_casing.tsv")  # Tools/ma
 OUT = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
 VOCAB = os.path.join(ROOT, "Data", "lm9", "vocab.json")  # the language model's characters
 
+# The Unicode blocks of Chinese characters (GB 18030 maps all of them): the basic block, extensions
+# A to H and the compatibility ideographs.
+HANZI_BLOCKS = [(0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x20000, 0x2EBEF), (0x30000, 0x323AF), (0xF900, 0xFAFF)]
 MAX_SYLLABLES = 8
 # Occurrences per million characters a word is credited with for being listed by this many lexicons.
 FLOOR = {2: 0.03, 3: 0.08, 4: 0.2, 5: 0.3, 6: 0.5, 7: 0.7, 8: 1.0}
@@ -39,8 +43,14 @@ MIN_SOURCES_SHORT = 2  # words of 1-4 characters
 MIN_SOURCES_LONG = 3  # longer phrases, which were not counted
 MIN_SOURCES_SEEN = 4  # below this many lexicons a word must also occur in everyday text ...
 MIN_RATE_FEW = 0.05  # ... at least this often per million characters
-ENGLISH_WORDS = 30000
+ENGLISH_WORDS = 50000  # the whole frequency list (30000 left out common words such as dialog, #30421)
 ENGLISH_FLOOR = 0.02  # per million, for English words never seen in Chinese text
+# How an ordinary English word (one the English frequency list knows) is offered: in lowercase first,
+# unless one other casing is written this share of the time or more inside Chinese text (OK); any
+# other casing written at least ENGLISH_OTHER_FORM of the time comes as a further candidate (Hello,
+# IT). Deliberate mixed case (macOS, iPhone) keeps the casing make_english_casing.py chose.
+ENGLISH_MOSTLY = 0.6
+ENGLISH_OTHER_FORM = 0.2
 ENGLISH_CAPITAL_RATE = 0.1  # per million: a capitalised letter string this common is a name or abbreviation (NBA, iPhone)
 
 
@@ -109,6 +119,31 @@ def main():
                 by_char[token] = [(r, 1.0) for r in options]
                 added += 1
     print(f"{added} characters added from pypinyin")
+    # Every Chinese character with a reading must be typeable (GB/T 19246-2003 4.2: the whole GB 18030
+    # set): the characters pypinyin reads that neither the readings table nor the model's vocabulary
+    # has, at the same small rate. Their word ids come after all others (see below), so the ids of
+    # the words the bigram model was counted on stay as they were.
+    # Only readings of the syllables already known (those of 《汉语拼音方案》, 4.3.3): dialect readings
+    # (din, wong) and interjections (m, ng) would make single letters and common runs whole syllables.
+    known_syllables = {r for readings in by_char.values() for r, _ in readings}
+    rare_chars = set()
+    for code in sorted(PINYIN_DICT):
+        char = chr(code)
+        if char in by_char or not any(a <= code <= b for a, b in HANZI_BLOCKS):
+            continue
+        options = [r for r in to_pinyin(char, style=Style.NORMAL, heteronym=True)[0] if r in known_syllables]
+        if options:
+            by_char[char] = [(r, 1.0) for r in options]
+            rare_chars.add(char)
+    print(f"{len(rare_chars)} more characters from pypinyin, to type every character with a reading")
+    # ê is typed "ea" on the keyboard (GF 3006-2001, 4.3.4). The readings table writes it as e and
+    # pypinyin as ê (not ASCII), so it had no key: the characters pypinyin reads ê get the reading ea.
+    read_e_circumflex = 0
+    for char, readings in by_char.items():
+        if "ê" in to_pinyin(char, style=Style.NORMAL, heteronym=True)[0] and all(r != "ea" for r, _ in readings):
+            readings.append(("ea", 1.0))
+            read_e_circumflex += 1
+    print(f"{read_e_circumflex} characters read ê, typed ea")
     chars = 0
     for char, readings in by_char.items():
         everyday = counts.get(char, 0.0) + (0.5 if char in reading_use or counts.get(char, 0.0) > 0 else 0.05)
@@ -137,24 +172,40 @@ def main():
                 break
             if word.isalpha() and word.isascii():
                 known.setdefault(word.lower(), count)
-    english = {}
+    english = {}  # lower -> [(written, rate)], the first the commonest way of writing it
     with open(CASING, encoding="utf-8") as f:
         for line in f:
-            lower, usual, rate = line.rstrip("\n").split("\t")[:3]
-            rate = float(rate)
+            fields = line.rstrip("\n").split("\t")
+            lower, usual, rate = fields[0], fields[1], float(fields[2])
             if not (lower.isalpha() and lower.isascii()):
                 continue
-            if lower in known or (usual != lower and rate >= ENGLISH_CAPITAL_RATE):
-                english[lower] = (usual, rate)
+            if lower in known:
+                forms = [(form, float(share)) for form, share in (item.rsplit(":", 1) for item in fields[3].split())] if len(fields) > 3 else []
+                deliberate = usual != lower and not usual.isupper() and not usual.istitle()
+                if deliberate or not forms:
+                    english[lower] = [(usual, rate)]
+                    continue
+                top, top_share = max(((f, s) for f, s in forms if f != lower), key=lambda x: x[1], default=(lower, 0.0))
+                first = top if top_share >= ENGLISH_MOSTLY else lower
+                written = [(first, rate)]
+                written += [(form, rate * share) for form, share in forms if form != first and share >= ENGLISH_OTHER_FORM]
+                if first != lower and all(form != lower for form, _ in written):
+                    written.append((lower, rate * dict(forms).get(lower, 0.0)))
+                english[lower] = [(form, r) for form, r in written if r > 0]
+            elif usual != lower and rate >= ENGLISH_CAPITAL_RATE:
+                english[lower] = [(usual, rate)]
     for lower, count in known.items():
         if lower not in english:
-            english[lower] = (lower, ENGLISH_FLOOR * (1 - count / ENGLISH_WORDS))
-    print(f"{len(english):,} English words")
+            english[lower] = [(lower, ENGLISH_FLOOR * (1 - count / ENGLISH_WORDS))]
+    print(f"{len(english):,} English words, {sum(len(v) for v in english.values()):,} ways of writing them")
 
 
-    total = sum(entries.values()) + sum(rate for _, rate in english.values())
-    english_rows = [(lower, usual, math.log(rate / total)) for lower, (usual, rate) in english.items()]
+    total = sum(entries.values()) + sum(rate for written in english.values() for _, rate in written)
+    english_rows = [(lower, form, math.log(rate / total)) for lower, written in english.items() for form, rate in written]
     wids = {}
+    for _key, word in sorted(entries):
+        if word not in rare_chars:
+            wids.setdefault(word, len(wids) + 1)
     for _key, word in sorted(entries):
         wids.setdefault(word, len(wids) + 1)
     rows = sorted(

@@ -18,6 +18,8 @@ Data/*
 !Data/eval_touchpal.tsv
 !Data/eval_short.tsv
 !Data/eval.tsv
+# Cases the user reported (one line each: keys, expected text, context); kept to check each fix.
+!Data/eval_reported.tsv
 !Data/personal/
 Data/personal/*
 !Data/personal/forum2.train.txt

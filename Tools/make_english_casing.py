@@ -3,8 +3,9 @@
 
     Data/venv-train/bin/python Tools/make_english_casing.py
 
-One line per word: "lower<TAB>Usual<TAB>everyday_per_million", the usual casing being the most
-frequent one (iPhone, OK, macOS).
+One line per word: "lower<TAB>Usual<TAB>everyday_per_million<TAB>forms", the usual casing being the
+most frequent one (iPhone, OK, macOS) and forms each casing seen with its share ("Hello:0.62 hello:0.31"),
+so the lexicon can offer more than one way of writing a word.
 Words that start a sentence are capitalised for that reason alone, so they are not counted.
 The rate is per million characters of the same everyday mixture Training/count_words.py uses,
 so English words and Chinese words sit on one scale in the lexicon.
@@ -69,7 +70,8 @@ def main():
                     if variant != lower and not variant.isupper() and not variant.istitle() and count >= MIXED_CASE_SHARE * total:
                         usual = variant
                         break
-            f.write(f"{lower}\t{usual}\t{rate:.4f}\n")
+            shares = " ".join(f"{variant}:{count / total:.3f}" for variant, count in variants.most_common())
+            f.write(f"{lower}\t{usual}\t{rate:.4f}\t{shares}\n")
             written += 1
     print(f"wrote {OUT}: {written:,} words")
 

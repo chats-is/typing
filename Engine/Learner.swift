@@ -16,6 +16,10 @@ public final class Learner {
         /// The person's own inputs typed alone: how many the tuned model learned the wrong way round
         /// (it prefers a reading never typed with those keys that the shipped model scored lower).
         public var typedReversed = 0, typedCount = 0
+        /// The person's own most recent inputs typed alone: first choice under the engine's rule.
+        public var loneBefore = 0.0, loneAfter = 0.0, loneCount = 0
+        /// The learning rate of the kept (or last tried) training.
+        public var learningRate: Float = 0
         public var seconds = 0.0
         /// The tuned model that was kept, ready for the engine (nil when nothing was kept).
         public var scorer: GraphScorer?
@@ -39,18 +43,23 @@ public final class Learner {
     /// Enough steps for a small amount of text to be learned (validation and rollback guard the rest).
     public var minimumSteps = 100
     public var charactersPerStep = 250
-    public var learningRate: Float = 2e-5
+    /// The session trains at `learningRate`; when the checks reject the result it trains once more
+    /// at `fallbackLearningRate`. Measured 2026-10-18 on the Mac mini (the user's data and three
+    /// people from held-out forum text, 2k to 80k characters): 2e-5 hardly made the model remember
+    /// even what it was trained on; 6e-5 remembered 1 to 3 points more and passed the checks except
+    /// at one data amount, where 2e-5 passed; 1e-4 and more broke general text.
+    public var learningRate: Float = 6e-5
+    public var fallbackLearningRate: Float = 2e-5
     public var heldOutFraction = 0.1
     public var heldOutMinimum = 20
     public var heldOutMaximum = 100
-    /// Allowed drops (percentage points) before a result is rejected.
+    /// Allowed drops (percentage points) before a result is rejected: the person's own input (in
+    /// context, and their lone inputs) and general text. Common lone words and readings learned the
+    /// wrong way round are recorded only: under the lone-word rule only words the person has typed
+    /// move, so every change there is the person's own order, which their lone inputs judge.
     public var personalTolerance = 0.5
     public var generalTolerance = 1.0
-    public var wordsTolerance = 1.0
-    /// Allowed share (percent) of the person's own lone inputs the tuned model may learn the wrong
-    /// way round.
-    public var typedTolerance = 1.0
-    /// How many of the most recent distinct inputs the typed check looks at.
+    /// How many of the most recent distinct inputs the lone checks look at.
     public var typedMaximum = 300
     /// Set from another thread to stop a running session early (checked between steps and before
     /// anything is written).
@@ -247,6 +256,17 @@ public final class Learner {
         return text
     }
 
+    /// The person's most recent distinct inputs with keys, typed alone (no context).
+    func loneCases(_ inputs: [LearningStore.Entry]) -> [Case] {
+        var seen = Set<String>(), cases: [Case] = []
+        for entry in inputs.reversed() where !entry.keys.isEmpty && seen.insert(entry.keys + "\u{1F}" + entry.text).inserted {
+            if cases.count >= typedMaximum { break }
+            waitWhilePaused()
+            cases.append(Case(expected: entry.text, context: "", readings: readings(entry.keys, "")))
+        }
+        return cases
+    }
+
     /// Runs one session; blocking, meant for a background thread.
     public func runSession(log: ((String) -> Void)? = nil) -> Outcome {
         var outcome = Outcome()
@@ -293,7 +313,9 @@ public final class Learner {
             let general = generalCases()
             let words = generalWordCases()
             let typed = typedCases(inputs)
+            let lone = loneCases(inputs)
             outcome.typedCount = typed.count
+            outcome.loneCount = lone.count
             outcome.personalCount = personalCases.count
             outcome.generalCount = general.count
             outcome.wordsCount = words.count
@@ -319,61 +341,70 @@ public final class Learner {
                 outcome.personalBefore = exactRate(personalCases, scorer: before)
                 outcome.generalBefore = exactRate(general, scorer: before)
                 outcome.wordsBefore = loneExactRate(words, tuned: before, shipped: shipped ?? before)
+                outcome.loneBefore = loneExactRate(lone, tuned: before, shipped: shipped ?? before)
             }
-            log?("before: personal \(outcome.personalBefore) general \(outcome.generalBefore) words \(outcome.wordsBefore)")
+            log?("before: personal \(outcome.personalBefore) lone \(outcome.loneBefore) general \(outcome.generalBefore) words \(outcome.wordsBefore)")
 
             waitWhilePaused()
             if cancelled { outcome.reason = "cancelled"; return outcome }
             trained = true
             let candidateBase = store.tunedBase + ".new"
-            do {
-                // The trainer (fp32 copies, Adam state) lives only until its result is saved.
-                let trainer = try GraphTrainer(weights: shippedWeights)
-                let steps = min(maximumSteps, max(minimumSteps, stream.count / charactersPerStep))
-                var generator: any RandomNumberGenerator = seed.map { SplitMix64(seed: $0) as any RandomNumberGenerator } ?? SystemRandomNumberGenerator()
-                for step in 1...steps {
+            // The shipped model on the GPU runtime, built after the first training (not beside it).
+            var referenceScorer: SentenceScorer? = shipped
+            let steps = min(maximumSteps, max(minimumSteps, stream.count / charactersPerStep))
+            var rates = [learningRate]
+            if fallbackLearningRate != learningRate { rates.append(fallbackLearningRate) }
+            for rate in rates {
+                do {
+                    // The trainer (fp32 copies, Adam state) lives only until its result is saved.
+                    let trainer = try GraphTrainer(weights: shippedWeights)
+                    var generator: any RandomNumberGenerator = seed.map { SplitMix64(seed: $0) as any RandomNumberGenerator } ?? SystemRandomNumberGenerator()
+                    for step in 1...steps {
+                        waitWhilePaused()
+                        if cancelled { outcome.reason = "cancelled"; return outcome }
+                        let starts = (0..<trainer.batch).map { _ in Int.random(in: 0 ..< max(1, stream.count - trainer.rows - 1), using: &generator) }
+                        let loss = trainer.step(stream: stream, starts: starts, learningRate: rate)
+                        if step % 50 == 0 { log?("step \(step)/\(steps) at \(rate) loss \(loss)") }
+                    }
+                    outcome.steps = steps
+                    outcome.learningRate = rate
                     waitWhilePaused()
                     if cancelled { outcome.reason = "cancelled"; return outcome }
-                    let starts = (0..<trainer.batch).map { _ in Int.random(in: 0 ..< max(1, stream.count - trainer.rows - 1), using: &generator) }
-                    let loss = trainer.step(stream: stream, starts: starts, learningRate: learningRate)
-                    if step % 50 == 0 { log?("step \(step)/\(steps) loss \(loss)") }
+                    try trainer.save(to: candidateBase, config: shippedWeights.config)
                 }
-                outcome.steps = steps
-                waitWhilePaused()
-                if cancelled { outcome.reason = "cancelled"; return outcome }
-                try trainer.save(to: candidateBase, config: shippedWeights.config)
-            }
-            var tunedWeights = shippedWeights
-            tunedWeights.apply(tuned: try GraphScorer.Weights(path: candidateBase))
-            let after = try GraphScorer(weights: tunedWeights, vocabularyURL: vocabularyURL)
-            outcome.personalAfter = exactRate(personalCases, scorer: after)
-            outcome.generalAfter = exactRate(general, scorer: after)
-            let reference = try shipped ?? GraphScorer(weights: shippedWeights, vocabularyURL: vocabularyURL)
-            outcome.wordsAfter = loneExactRate(words, tuned: after, shipped: reference)
-            outcome.typedReversed = typedReversed(typed, tuned: after, shipped: reference)
-            log?("after: personal \(outcome.personalAfter) general \(outcome.generalAfter) words \(outcome.wordsAfter) typed reversed \(outcome.typedReversed)/\(outcome.typedCount)")
+                var tunedWeights = shippedWeights
+                tunedWeights.apply(tuned: try GraphScorer.Weights(path: candidateBase))
+                let after = try GraphScorer(weights: tunedWeights, vocabularyURL: vocabularyURL)
+                if referenceScorer == nil { referenceScorer = try GraphScorer(weights: shippedWeights, vocabularyURL: vocabularyURL) }
+                let reference = referenceScorer!
+                outcome.personalAfter = exactRate(personalCases, scorer: after)
+                outcome.generalAfter = exactRate(general, scorer: after)
+                outcome.wordsAfter = loneExactRate(words, tuned: after, shipped: reference)
+                outcome.loneAfter = loneExactRate(lone, tuned: after, shipped: reference)
+                outcome.typedReversed = typedReversed(typed, tuned: after, shipped: reference)
+                log?("after at \(rate): personal \(outcome.personalAfter) lone \(outcome.loneAfter) general \(outcome.generalAfter) words \(outcome.wordsAfter) typed reversed \(outcome.typedReversed)/\(outcome.typedCount)")
 
-            let typedOK = typed.isEmpty || 100 * Double(outcome.typedReversed) / Double(typed.count) <= typedTolerance
-            let wordsOK = words.isEmpty || outcome.wordsAfter >= outcome.wordsBefore - wordsTolerance
-            let generalOK = (general.isEmpty || outcome.generalAfter >= outcome.generalBefore - generalTolerance) && wordsOK
-            let personalOK = personalCases.count < heldOutMinimum || outcome.personalAfter >= outcome.personalBefore - personalTolerance
-            if cancelled { outcome.reason = "cancelled"; return outcome }
-            if generalOK && personalOK && typedOK {
-                // The .bin goes first: a .json without its .bin would be taken for tuned weights.
-                for ext in [".bin", ".json"] {
-                    let from = URL(fileURLWithPath: candidateBase + ext), to = URL(fileURLWithPath: store.tunedBase + ext)
-                    _ = try FileManager.default.replaceItemAt(to, withItemAt: from)
-                    try? FileManager.default.removeItem(at: from)
+                let loneOK = lone.isEmpty || outcome.loneAfter >= outcome.loneBefore - personalTolerance
+                let generalOK = general.isEmpty || outcome.generalAfter >= outcome.generalBefore - generalTolerance
+                let personalOK = personalCases.count < heldOutMinimum || outcome.personalAfter >= outcome.personalBefore - personalTolerance
+                if cancelled { outcome.reason = "cancelled"; return outcome }
+                if generalOK && personalOK && loneOK {
+                    // The .bin goes first: a .json without its .bin would be taken for tuned weights.
+                    for ext in [".bin", ".json"] {
+                        let from = URL(fileURLWithPath: candidateBase + ext), to = URL(fileURLWithPath: store.tunedBase + ext)
+                        _ = try FileManager.default.replaceItemAt(to, withItemAt: from)
+                        try? FileManager.default.removeItem(at: from)
+                    }
+                    // Last: tensors without it are taken for another model's and relearned.
+                    if let shippedFingerprint { try shippedFingerprint.write(to: store.tunedModelURL, atomically: true, encoding: .utf8) }
+                    else { try? FileManager.default.removeItem(at: store.tunedModelURL) }
+                    outcome.accepted = true
+                    outcome.reason = "kept"
+                    outcome.scorer = after
+                    break
                 }
-                // Last: tensors without it are taken for another model's and relearned.
-                if let shippedFingerprint { try shippedFingerprint.write(to: store.tunedModelURL, atomically: true, encoding: .utf8) }
-                else { try? FileManager.default.removeItem(at: store.tunedModelURL) }
-                outcome.accepted = true
-                outcome.reason = "kept"
-                outcome.scorer = after
-            } else {
                 for ext in [".json", ".bin"] { try? FileManager.default.removeItem(atPath: candidateBase + ext) }
-                outcome.reason = !typedOK ? "typed words learned the wrong way round" : !wordsOK ? "common words got worse" : !generalOK ? "general input got worse" : "personal input got worse"
+                outcome.reason = !loneOK ? "own lone inputs got worse" : !generalOK ? "general input got worse" : "personal input got worse"
             }
         } catch {
             outcome.reason = "error: \(error)"

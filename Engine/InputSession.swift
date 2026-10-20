@@ -37,6 +37,13 @@ public final class InputSession {
         confirmed.map(\.candidate.text).joined() + remaining
     }
 
+    /// What sending the letters as typed gives: picked candidates, then the letters not converted
+    /// with their "'" as typed (xi'an, don't); a "'" left in front of them by a pick is dropped.
+    public var typedText: String {
+        let letters = confirmed.isEmpty ? Substring(remaining) : remaining.drop { $0 == "'" }
+        return confirmed.map(\.candidate.text).joined() + letters
+    }
+
     /// Appends a letter (capitals are kept as typed inside the composition) or a "'" separator.
     public func insert(_ character: Character) {
         guard remaining.count < Self.maxBufferLength else { return }

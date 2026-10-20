@@ -24,6 +24,7 @@ var modelPath: String?
 var vocabularyPath: String?
 var computeUnits = MLComputeUnits.cpuAndNeuralEngine
 var keystrokeEvalPath: String?
+var keystrokePages = 2  // pages of candidates the simulated user looks through (--pages)
 var showFailures = false
 var noSlips = false
 var lexiconPath: String?
@@ -67,6 +68,7 @@ while let argument = arguments.popFirst() {
     case "--cpu": computeUnits = .cpuOnly
     case "--eval": evalPath = arguments.popFirst()
     case "--keystroke-eval": keystrokeEvalPath = arguments.popFirst()
+    case "--pages": keystrokePages = arguments.popFirst().flatMap(Int.init) ?? keystrokePages
     case "--show-failures": showFailures = true
     case "--lexicon": lexiconPath = arguments.popFirst()
     case "--bigram": bigramPath = arguments.popFirst()
@@ -323,7 +325,7 @@ if let learnDemo, let lexiconEngine, let graphWeightsPath {
             print("  \(probe) -> " + result.candidates.prefix(5).map(\.text).joined(separator: " "))
         }
     }
-    print(String(format: "session: %@ (%@) steps %d  personal %.2f -> %.2f (n=%d)  general %.2f -> %.2f (n=%d)  words %.2f -> %.2f (n=%d)  typed reversed %d (n=%d)  %.0f s", outcome.accepted ? "KEPT" : "DISCARDED", outcome.reason, outcome.steps, outcome.personalBefore, outcome.personalAfter, outcome.personalCount, outcome.generalBefore, outcome.generalAfter, outcome.generalCount, outcome.wordsBefore, outcome.wordsAfter, outcome.wordsCount, outcome.typedReversed, outcome.typedCount, outcome.seconds))
+    print(String(format: "session: %@ (%@) steps %d at %g  personal %.2f -> %.2f (n=%d)  own lone %.2f -> %.2f (n=%d)  general %.2f -> %.2f (n=%d)  recorded: words %.2f -> %.2f (n=%d), typed reversed %d (n=%d)  %.0f s", outcome.accepted ? "KEPT" : "DISCARDED", outcome.reason, outcome.steps, Double(outcome.learningRate), outcome.personalBefore, outcome.personalAfter, outcome.personalCount, outcome.loneBefore, outcome.loneAfter, outcome.loneCount, outcome.generalBefore, outcome.generalAfter, outcome.generalCount, outcome.wordsBefore, outcome.wordsAfter, outcome.wordsCount, outcome.typedReversed, outcome.typedCount, outcome.seconds))
     exit(0)
 }
 
@@ -427,9 +429,12 @@ if let keystrokeEvalPath {
     // A user types the whole pinyin, then repeatedly picks the longest candidate on the first two
     // pages that is a correct prefix of what is left (space or a digit, plus one key per page
     // turned). A character no candidate offers is counted as given up: typed by other means at
-    // an estimated 4 keys.
-    let pageSize = 9, pagesLooked = 2, giveUpCost = 4
-    var sentences = 0, characters = 0, keys = 0, letters = 0, failures = 0, firstPickWhole = 0
+    // an estimated 4 keys. The two figures of GB/T 19246-2003 4.4: average keys per character
+    // (平均码长, every key counted) and the share of characters confirmed with a selection key
+    // rather than taken as the first candidate (重码字词键选率; given-up characters count as selected).
+    let pageSize = 9, pagesLooked = keystrokePages, giveUpCost = 4
+    lexiconEngine?.deferRerank = false  // the model's order at once: nothing waits for the deferred look here
+    var sentences = 0, characters = 0, keys = 0, letters = 0, failures = 0, firstPickWhole = 0, selected = 0
     for line in try String(contentsOfFile: keystrokeEvalPath, encoding: .utf8).split(separator: "\n") {
         let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
         guard fields.count >= 2, sentences < limit else { continue }
@@ -468,11 +473,13 @@ if let keystrokeEvalPath {
                     print("  stuck at \(String(expected[done...])) [\(syllables[done...].joined(separator: " "))]: \(offered)")
                 }
                 keys += giveUpCost * (expected.count - done)
+                selected += expected.count - done
                 break
             }
             if first && choice.length == expected.count { firstPickWhole += 1 }
             first = false
             keys += 1 + choice.index / pageSize
+            if choice.index > 0 { selected += choice.length }
             done += choice.length
             _ = session.select(choice.index)
         }
@@ -480,5 +487,6 @@ if let keystrokeEvalPath {
     print("typed \(sentences) sentences, \(characters) characters: \(String(format: "%.2f", Double(keys) / Double(max(characters, 1)))) keys per character"
         + " (\(String(format: "%.2f", Double(letters) / Double(max(characters, 1)))) of them pinyin letters);"
         + " whole sentence picked at once \(String(format: "%.1f%%", 100 * Double(firstPickWhole) / Double(max(sentences, 1))));"
-        + " gave up on \(failures) sentences")
+        + " gave up on \(failures) sentences;"
+        + " selected with a key \(String(format: "%.2f%%", 100 * Double(selected) / Double(max(characters, 1)))) of characters")
 }

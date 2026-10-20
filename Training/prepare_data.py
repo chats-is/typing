@@ -9,7 +9,9 @@ for evaluation). It also writes <out>/vocab.json (a JSON list, index = token id)
 (the held-out documents of all sources, tokenised) and <out>/sources.json (name -> sampling weight).
 
 Tokens are single characters: Chinese by character, everything else lowercased character by
-character. Documents written mostly in traditional characters are dropped.
+character. Documents written mostly in traditional characters are dropped. Training documents
+are cleaned (Training/cleaning.py: nothing identifying, nothing one does not type); the held-out
+ones are kept as they are, and which documents are held out does not change.
 
 --cased-from Data/lm9 keeps the case of English letters instead ("iPhone", "CEO"): it reuses that
 directory's vocabulary, so a model trained on it can be trained further, and adds the 26
@@ -26,6 +28,7 @@ import re
 
 import numpy as np
 
+from cleaning import clean
 from sources import ROOT, SOURCES
 
 SPECIAL = ["<pad>", "<bos>", "<unk>"]
@@ -166,21 +169,30 @@ def main():
     with open(os.path.join(args.out, "val.bin"), "ab" if args.only_words or args.add else "wb") as val:
         for name in names:
             total = kept = dropped = held = 0
+            before_chars = after_chars = 0
             with open(os.path.join(args.out, f"{name}.bin"), "wb") as train, \
                     open(os.path.join(args.out, f"holdout_{name}.txt"), "w", encoding="utf-8") as holdout:
                 for index, points in enumerate(documents(name, known), 1):
-                    ids = encode(points)
                     if index % HOLDOUT_EVERY == 0 and held < MAX_HOLDOUT_DOCS:
                         held += 1
-                        val.write(ids.tobytes())
+                        val.write(encode(points).tobytes())
                         holdout.write(points.astype("<u4").tobytes().decode("utf-32-le") + "\n\n")
                         continue
+                    text = points.astype("<u4").tobytes().decode("utf-32-le")
+                    cleaned = clean(text)
+                    before_chars += len(text)
+                    if cleaned is None or len(cleaned) < 5:
+                        dropped += 1
+                        continue
+                    after_chars += len(cleaned)
+                    ids = encode(codepoints(cleaned))
                     train.write(ids.tobytes())
                     total += len(ids)
                     kept += 1
                     if kept % 1_000_000 == 0:
                         print(f"  {name}: {kept} documents, {total / 1e6:.0f}M tokens", flush=True)
-            print(f"{name}: {kept} documents, {total / 1e6:.0f}M tokens, {held} held out", flush=True)
+            print(f"{name}: {kept} documents, {total / 1e6:.0f}M tokens, {held} held out; cleaning dropped {dropped} documents"
+                  f" and {100 * (1 - after_chars / max(1, before_chars)):.2f}% of the characters", flush=True)
 
     if args.add:
         with open(os.path.join(args.out, "sources.json"), "w", encoding="utf-8") as f:

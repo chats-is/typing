@@ -47,6 +47,10 @@ public final class LexiconDecoder: CandidateDecoding {
     public var baseScorer: SentenceScorer?
     /// Which words the person has actually written (learning may move only those as lone words).
     public var learnedWords: ((String) -> Bool)?
+    /// English words the person has written, by the letters typed for them: offered as English
+    /// readings even when the English table lacks them (at the table's rarest frequency; learning
+    /// decides how far they rise).
+    public var typedEnglish: ((String) -> [String])?
     /// Keys (letters only) whose learned order the person deleted: typed alone they keep the
     /// general order until the next kept learning session.
     public var heldKeys: ((String) -> Bool)?
@@ -80,8 +84,8 @@ public final class LexiconDecoder: CandidateDecoding {
     /// Whether the model's rerank is returned as the result's `refine` step (the host shows the
     /// lattice's reading first) instead of being done before returning.
     public var deferRerank = true
-    /// Chinese before English: among candidates covering the same keys, a reading made of Chinese words
-    /// comes before any reading that contains an English word (the user's condition).
+    /// Chinese before English: among candidates covering the same keys, a Chinese word comes before
+    /// any reading that contains an English word (the user's condition).
     public var chineseFirst = true
     /// Multiplier on the typing-slip costs of SyllableMatcher (substitution, missing, stray, transposed letters).
     public var slipScale = 1.0
@@ -95,6 +99,17 @@ public final class LexiconDecoder: CandidateDecoding {
 
     private static let maxWordSyllables = 8
     private static let maxCandidates = 300
+    /// Every character of a syllable as candidates, by syllable (the buffer is that syllable alone).
+    private var allCharactersCache: [String: [Candidate]] = [:]
+    private func allCharacters(_ syllable: String, consumed: Int) -> [Candidate] {
+        if let cached = allCharactersCache[syllable], cached.first?.consumed == consumed { return cached }
+        let list = timedLexicon({ lexicon.characters(syllable) }).map {
+            Candidate(text: $0.word, consumed: consumed, words: [WordRef(text: $0.word, wid: $0.wid, key: $0.key)], score: $0.logp)
+        }
+        if allCharactersCache.count > 512 { allCharactersCache.removeAll() }
+        allCharactersCache[syllable] = list
+        return list
+    }
     /// States kept per lattice node (one per word).
     public var beamWidth = 12  // 24 → 12 measured identical on 1200 sentences, lattice time −35% (2026-10-14)
     /// How many whole-buffer readings the language model compares (--sentences in the CLI).
@@ -308,18 +323,20 @@ public final class LexiconDecoder: CandidateDecoding {
         return reranked
     }
 
-    /// Moves the best all-Chinese reading in front of English-containing readings of the same length.
+    /// Moves the best Chinese word in front of English-containing readings of the same length. Only a
+    /// reading that is one word of the lexicon counts: single characters strung over the letters of
+    /// an English word (咯啊定 for loading) are no Chinese word.
     private func chinesePriority(_ result: DecodeResult) -> DecodeResult {
         guard chineseFirst, let first = result.candidates.first else { return result }
         func isEnglish(_ c: Candidate) -> Bool { c.words.contains { $0.wid == 0 && $0.text.contains { $0.isASCII && $0.isLetter } } }
         guard isEnglish(first) else { return result }
         var candidates = result.candidates
-        if let index = candidates.firstIndex(where: { $0.consumed == first.consumed && !isEnglish($0) }), index > 0 {
+        if let index = candidates.firstIndex(where: { $0.consumed == first.consumed && !isEnglish($0) && $0.words.count == 1 }), index > 0 {
             let chinese = candidates.remove(at: index)
             candidates.insert(chinese, at: 0)
         }
         var sentences = result.sentences
-        if let s = sentences.first, isEnglish(s), let index = sentences.firstIndex(where: { !isEnglish($0) }), index > 0 {
+        if let s = sentences.first, isEnglish(s), let index = sentences.firstIndex(where: { !isEnglish($0) && $0.words.count == 1 }), index > 0 {
             let chinese = sentences.remove(at: index)
             sentences.insert(chinese, at: 0)
         }
@@ -538,9 +555,16 @@ public final class LexiconDecoder: CandidateDecoding {
                 // more often than an English word: such an English reading pays what the abbreviation
                 // pays (initialPenalty per letter), and the frequencies decide. Inside a longer buffer
                 // English keeps its own cost.
-                for entry in timedLexicon({ lexicon.english(slice(start, j)) }) {
+                let letters = slice(start, j)
+                let table = timedLexicon({ lexicon.english(letters) })
+                for entry in table {
                     reachable[j] = true
                     edges.append(Edge(start: start, end: j, word: WordRef(text: entry.word, wid: 0, key: entry.key), logp: entry.logp,
+                                      penalty: englishPenalty, cuts: [j], partial: false, english: true))
+                }
+                for word in typedEnglish?(letters) ?? [] where !table.contains(where: { $0.word == word }) {
+                    reachable[j] = true
+                    edges.append(Edge(start: start, end: j, word: WordRef(text: word, wid: 0, key: letters), logp: lexicon.englishFloor,
                                       penalty: englishPenalty, cuts: [j], partial: false, english: true))
                 }
             }
@@ -673,13 +697,26 @@ public final class LexiconDecoder: CandidateDecoding {
         for (edge, score) in leading {
             add(edge.word.text, edge.end, [edge.word], score)
         }
+        // When the buffer is one syllable, every other character read so follows, past the cap above:
+        // all characters must be reachable by turning the pages (GB/T 19246-2003 4.2). A rare one is
+        // typed by its syllable alone; longer buffers skip this, as it would slow every keystroke.
+        var syllablesListed = Set<String>()
+        var listed: Set<String>?
+        for (edge, _) in leading where edge.end == n && edge.word.wid != 0 && !edge.partial && !edge.english && edge.word.text.count == 1 {
+            guard syllablesListed.insert(edge.word.key).inserted else { continue }
+            if listed == nil { listed = Set(candidates.lazy.filter { $0.consumed == n }.map(\.text)) }
+            for candidate in allCharacters(edge.word.key, consumed: n) where listed!.insert(candidate.text).inserted {
+                candidates.append(candidate)
+            }
+        }
 
         var cuts = Set(path.flatMap(\.cuts))
         cuts.remove(n)
+        // Syllables found by the decoder are shown apart; a "'" the person typed shows as typed (xi'an).
         var segmented = ""
         for (i, c) in chars.enumerated() {
-            if cuts.contains(i) && c != Self.apostrophe && segmented.last != " " { segmented += " " }
-            segmented += c == Self.apostrophe ? " " : String(UnicodeScalar(c))
+            if cuts.contains(i) && c != Self.apostrophe && segmented.last != " " && segmented.last != "'" { segmented += " " }
+            segmented += String(UnicodeScalar(c))
         }
         phase(4)
         let result = DecodeResult(candidates: candidates, sentences: sentences.map(\.candidate), segmented: segmented)

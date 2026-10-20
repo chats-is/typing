@@ -23,6 +23,17 @@ Scripts/symtest.sh                     # 只跑按键测试
 5. 提交，并把变化写进 `docs/benchmarks.md`（数字）或 `docs/decisions.md`（新决定）。
 6. 推到 GitHub 后 CI 再跑一遍；打 `v*` 标签即发布。
 
+用户报告的输入问题记在 `Data/eval_reported.tsv`（每个一行：拼音、期望的词、前文），修的时候用它看结果：
+
+```sh
+.build/release/enginecli --model Resources/LanguageModel.mlmodelc --vocab Resources/vocab.json \
+  --lexicon Resources/lexicon.sqlite --bigram Resources/bigram.bin --eval Data/eval_reported.tsv --show-failures
+```
+
+| 记录日期 | 拼音 | 期望 | 现在 | 原因 |
+|---|---|---|---|---|
+| 2026-10-18 | dialog | 英文候选 dialog | 已解决：第一个候选 dialog | 两个原因都在词库数据：英文词频表只取前 3 万词（dialog 排第 30421），改为取满 5 万；每个词只给中文文本里最常见的写法（Dialog），改为普通词默认小写、其他常见写法作为后面的候选 |
+
 按改动类型再加专项：按键和界面改动先在 `Tools/symtest/main.swift` 加用例；词库或二元模型改动看句子集和 `--show-failures` 的失败样例；学习改动看 `--learn-demo` 的前后数字和回滚是否正确；性能改动看 `--typing` 和 `--pace`。
 
 ## 目录里的数据（`Data/`，不入库）
@@ -33,7 +44,7 @@ Scripts/symtest.sh                     # 只跑按键测试
 | `lexicons/` | 各家公开词库原文与合并表 `all_words.tsv` | `Tools/collect_*.py`、`merge_lexicons.py` |
 | `lexicon/` | 正式词库产物：`lexicon.sqlite`、`bigram.bin`、`bigram_counts.npz`（词对计数缓存）、`word_counts_vit3.tsv`、`english_casing.tsv`、`readings.tsv` | 下面的词库流程 |
 | `lm9/` | 当前模型：`model.pt`、各来源 token 流（实体文件，9 GB）、`vocab.json`、`sources.json`、32 行导出（mlpackage 与 mlmodelc）、`weights.*` | 下面的模型流程 |
-| `base/lm3_model.pt` | lm9 的起点（从头训练的 8 万步基座） | 历史产物 |
+| `base/lm3_model.pt` | lm9 的起点：lm2（从头 8 万步）接着训 2 万步（学习率 2e-4，加入网页、技术文档、tatoeba 和英文大小写）；lm9 = 它再训 6000 步 | 历史产物 |
 | `holdout/` | 各来源留出文本，所有评测集的来源 | `Training/prepare_data.py` |
 | `eval_*.tsv`、`wordlattice/`、`personal/` | 评测集、词测试的格子导出、学习验证材料 | 下面的评测流程 |
 | `venv-train/` | Python 环境（PyTorch、coremltools、pypinyin） | `python -m venv` + pip |
@@ -105,7 +116,7 @@ python3 Tools/extract_positions.py Data/prepared/weights Resources/positions.bin
 Scripts/gate.sh
 ```
 
-模型：8 层、512 宽、8 头、窗口 64 的字级 GPT，词表 9026，2990 万参数（`Training/model.py`）。从头训练用 `train.py --steps 80000`（无 `--init`）。换了出厂模型后，本机的微调文件会因结构不符自动丢弃并重新学习。
+模型：8 层、512 宽、8 头、窗口 64 的字级 GPT，词表 9026，2990 万参数（`Training/model.py`）。lm9 的完整做法是三段：`train.py --steps 80000`（无 `--init`，lm2 的配比：对话 .32、混合 .23、论坛 .16、新闻 .13、小说 .05、触宝 .05、人民日报 .03、词表 .03、英文 .01）→ `--init` 上一段 `--lr 2e-4 --steps 20000`（lm3 的配比：对话 .28、混合 .18、网页 .14、论坛 .12、新闻 .09、触宝 .05、小说 .04、人民日报、技术文档、tatoeba 各 .02、词表 .03、英文 .01）→ `--init` 上一段 `--lr 5e-5 --steps 6000`（lm9 的配比，`Data/lm9/sources.json`）。只用 lm9 的配比从头训 8 万步再加 6000 步，各测试都低于 lm9（对话 −3.3，2026-10-20）。换了出厂模型后，本机的微调文件会因结构不符自动丢弃并重新学习。
 
 当前装机：模型 lm9（lm3 基座 + 6000 步继续训练，验证损失 3.130，32 行导出），词库与二元模型为 2026-10-14 11:21 的构建。
 

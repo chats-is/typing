@@ -30,12 +30,14 @@ public final class Lexicon {
     private var abbreviationStmt: OpaquePointer?
     private var leadingStmt: OpaquePointer?
     private var englishStmt: OpaquePointer?
+    private var charactersStmt: OpaquePointer?
 
     private var exactCache: [String: [Entry]] = [:]
     private var prefixCache: [String: Bool] = [:]
     private var partialCache: [String: [Entry]] = [:]
     private var abbreviationCache: [String: [Entry]] = [:]
     private var englishCache: [String: [Entry]] = [:]
+    private var charactersCache: [String: [Entry]] = [:]
     private static let cacheLimit = 20_000
     /// SQLite statements and caches are shared; the deferred rerank and learning query from other threads.
     private let queryLock = NSRecursiveLock()
@@ -91,6 +93,12 @@ public final class Lexicon {
         }
         sqlite3_prepare_v2(db, "\(columns) INDEXED BY idx_n_key WHERE n = ?1 AND key >= ?2 AND key < ?3 AND key GLOB ?4 ORDER BY logp DESC LIMIT \(Lexicon.abbreviationLimit)", -1, &leadingStmt, nil)
         sqlite3_prepare_v2(db, "SELECT word, 0, key, logp FROM english WHERE key = ?1 ORDER BY logp DESC LIMIT 8", -1, &englishStmt, nil)
+        sqlite3_prepare_v2(db, "\(columns) WHERE key = ?1 AND n = 1 ORDER BY logp DESC", -1, &charactersStmt, nil)
+        var floor: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT MIN(logp) FROM english", -1, &floor, nil) == SQLITE_OK, sqlite3_step(floor) == SQLITE_ROW {
+            englishFloor = sqlite3_column_double(floor, 0)
+        }
+        sqlite3_finalize(floor)
     }
 
     deinit {
@@ -100,6 +108,7 @@ public final class Lexicon {
         sqlite3_finalize(abbreviationStmt)
         sqlite3_finalize(leadingStmt)
         sqlite3_finalize(englishStmt)
+        sqlite3_finalize(charactersStmt)
         sqlite3_close(db)
     }
 
@@ -110,6 +119,18 @@ public final class Lexicon {
         sqlite3_bind_text(exactStmt, 1, key, -1, Self.transient)
         let result = collect(exactStmt)
         store(result, for: key, in: &exactCache)
+        return result
+    }
+
+    /// Every character read `syllable`, best first: `exact` keeps a syllable's most usual ones only,
+    /// and every character must be reachable by turning the pages.
+    public func characters(_ syllable: String) -> [Entry] {
+        queryLock.lock(); defer { queryLock.unlock() }
+        guard charactersStmt != nil else { return [] }
+        if let cached = charactersCache[syllable] { return cached }
+        sqlite3_bind_text(charactersStmt, 1, syllable, -1, Self.transient)
+        let result = collect(charactersStmt)
+        store(result, for: syllable, in: &charactersCache)
         return result
     }
 
@@ -165,6 +186,9 @@ public final class Lexicon {
         return result
     }
 
+
+    /// The log probability of the rarest English word: what a word not in the table is given.
+    public private(set) var englishFloor = -20.0
 
     /// English words typed as `letters` (lowercase), written as they usually are, best first.
     public func english(_ letters: String) -> [Entry] {

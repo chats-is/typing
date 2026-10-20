@@ -141,25 +141,35 @@ type(".2."); key("", code: ESC); check(". then 。 (Esc closes)", text: ".。", 
 type("..2");                     check("。。2 → 。.", text: "。.", cursor: 2)
 type("."); key("", code: RIGHT); key("2", code: 19); check("。 → then 2 is typed (panel closed by arrow)", text: "。2", cursor: 2)
 type(".3");                      check("。 then 3 (no third candidate) → 。3", text: "。3", cursor: 2)
-// While the panel is up the mark is marked text (so the application hands Esc and digits to the
-// input method); Esc finishes it as shown; left alone it finishes by itself.
+// The mark is in the text at once (Return right after it sends it, as before), with the panel up.
 type(".")
 do {
-    let ok = controller.symbolPanelShown && client.marked != nil && client.text as String == "。"
-    print((ok ? "ok   " : "FAIL ") + "。 is marked text while the panel is up"); if !ok { failures += 1 }
+    let ok = controller.symbolPanelShown && client.marked == nil && client.text as String == "。" && client.cursor == 1
+    print((ok ? "ok   " : "FAIL ") + "。 goes into the text at once, panel up"); if !ok { failures += 1 }
 }
 key("", code: ESC)
 do {
-    let ok = !controller.symbolPanelShown && client.marked == nil && client.text as String == "。" && client.cursor == 1
+    let ok = !controller.symbolPanelShown && client.text as String == "。"
     print((ok ? "ok   " : "FAIL ") + "Esc closes the panel and keeps the mark"); if !ok { failures += 1 }
 }
 client.text = NSMutableString(); client.cursor = 0; client.marked = nil
-type(","); RunLoop.main.run(until: Date(timeIntervalSinceNow: TypingInputController.symbolFinishDelay - 1))
-print((controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel stays a little while with no key"); if !controller.symbolPanelShown { failures += 1 }
-RunLoop.main.run(until: Date(timeIntervalSinceNow: 1.5))
+type("."); key(" ", code: SPACE)
 do {
-    let ok = !controller.symbolPanelShown && client.marked == nil && client.text as String == "，" && client.cursor == 1
-    print((ok ? "ok   " : "FAIL ") + "with no key it finishes by itself and keeps the mark"); if !ok { failures += 1 }
+    let ok = !controller.symbolPanelShown && client.text as String == "。" && client.cursor == 1
+    print((ok ? "ok   " : "FAIL ") + "Space confirms the mark and types no space"); if !ok { failures += 1 }
+}
+client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+// The panel closes by itself when the application takes the text away (Return sent it, a button
+// was clicked), and when no key comes for a while.
+type("."); RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
+print((controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel stays while the mark is in place"); if !controller.symbolPanelShown { failures += 1 }
+client.text = NSMutableString(); client.cursor = 0
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
+print((!controller.symbolPanelShown ? "ok   " : "FAIL ") + "panel closes after the application cleared the text"); if controller.symbolPanelShown { failures += 1 }
+type(","); RunLoop.main.run(until: Date(timeIntervalSinceNow: TypingInputController.symbolFinishDelay + 0.5))
+do {
+    let ok = !controller.symbolPanelShown && client.text as String == "，"
+    print((ok ? "ok   " : "FAIL ") + "with no key the panel closes by itself, mark kept"); if !ok { failures += 1 }
 }
 client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 type("."); key("\r", code: 36)
@@ -228,11 +238,86 @@ print((!clickHandled && client.marked == nil ? "ok   " : "FAIL ") + "mouse click
 check("…text after the click", text: "ni", cursor: 2)
 type("ni0."); check("ni, 0, . → candidate, 0 and an English .", text: (EngineHost.decoder?.decode("ni", precedingText: "").refined().candidates.first?.text ?? "ni") + "0.", cursor: 3)
 type("nihao"); key("\r", code: 36); check("nihao, Return → pinyin as typed", text: "nihao", cursor: 5)
+// The "'" typed between letters stays when they go out as typed; picking a candidate is unchanged.
+func typeApostrophe(_ s: String) { for c in s { if c == "'" { key("'", code: 39) } else { type(String(c)) } } }
+typeApostrophe("xi'an")
+let shownWhileTyping = client.text as String
+print((shownWhileTyping == "xi'an" ? "ok   " : "FAIL ") + "xi'an shows as xi'an while typing: \"\(shownWhileTyping)\""); if shownWhileTyping != "xi'an" { failures += 1 }
+key("\r", code: 36); check("xi'an, Return → xi'an", text: "xi'an", cursor: 5)
+typeApostrophe("don't"); key("\r", code: 36); check("don't, Return → don't", text: "don't", cursor: 5)
+// A "'" right after letters typed straight into the text stays "'" (the system's Pinyin: XI'an); elsewhere it is a quote.
+key("X", code: 7, shift: true); key("I", code: 34, shift: true); typeApostrophe("'an"); key("\r", code: 36)
+check("XI'an, Return → XI'an", text: "XI'an", cursor: 5)
+key("'", code: 39); check("' on its own → ‘", text: "\u{2018}", cursor: 1)
+key("X", code: 7, shift: true); typeApostrophe("i'an"); key(" ", code: SPACE); check("Xi'an (Shift-X), space → Xi'an", text: "Xi'an", cursor: 5)
+if let decoder = EngineHost.decoder {
+    let candidates = decoder.decode("xi'an", precedingText: "").refined().candidates
+    if let first = candidates.first?.text {
+        typeApostrophe("xi'an"); key(" ", code: SPACE); check("xi'an, space → \(first)", text: first, cursor: first.count)
+    }
+    // A pick of the front, then Return: no "'" is sent in front of the letters left.
+    if let index = candidates.prefix(9).firstIndex(where: { $0.consumed < 5 }) {
+        let front = candidates[index].text
+        let rest = String("xi'an".dropFirst(candidates[index].consumed).drop { $0 == "'" })
+        typeApostrophe("xi'an"); key(String(index + 1), code: 18); key("\r", code: 36)
+        check("xi'an, pick \(front) for the front, Return → \(front)\(rest)", text: front + rest, cursor: front.count + rest.count)
+    } else { print("skip: no candidate for the front alone on the first page of xi'an") }
+}
+// The marks of GB/T 19246-2003 table 1 that were missing; Tab still gives the key's own character.
+key("`", code: 50); check("` → ．", text: "．", cursor: 1)
+key("{", code: 33, shift: true); key("}", code: 30, shift: true); check("{ } → 〔〕", text: "〔〕", cursor: 2)
+key("|", code: 42, shift: true); check("| → ·", text: "·", cursor: 1)
+key("|", code: 42, shift: true); key("\t", code: TAB); check("| then Tab → |", text: "|", cursor: 1)
+type("ai"); key("-", code: 27); check("ai, - → letters as typed and - (pages turn with the arrows only)", text: "ai-", cursor: 3)
+type("a"); key("=", code: 24); check("a, = → letters as typed and =", text: "a=", cursor: 2)
+type("ni"); key("", code: 125); key("-", code: 27); check("ni, ↓, - → letters as typed and - on any page", text: "ni-", cursor: 3)
 flags(56, [.shift]); keyMods("A", code: 0, [.shift]); flags(56, []); key("", code: SPACE)
 let shiftTyped = client.text as String
 print((!shiftTyped.isEmpty && (client.text as String) != "" ? "ok   " : "FAIL ") + "Shift held for a capital → no toggle (text \(shiftTyped))"); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 key("a", code: 0)
 print((client.marked != nil ? "ok   " : "FAIL ") + "…and the next letter still composes pinyin"); if client.marked == nil { failures += 1 }
 key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+// English mode: a word typed there is recorded for learning; addresses, code and single letters are not.
+ShortcutStore.shared.resetDefaults()
+flags(56, [.shift]); flags(56, []); key("q", code: 12)
+let english = client.marked == nil
+key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+print((english ? "ok   " : "FAIL ") + "Shift alone → English for the word test"); if !english { failures += 1 }
+for c in "Hello, worls" { key(String(c), code: 0) }
+key("", code: DEL); key("d", code: 0)  // worls → worl → world
+for token in [" foo.bar ", "x ", "don't ", "v2 ", "https://a.cn "] { for c in token { key(String(c), code: c == " " ? SPACE : 0) } }
+flags(56, [.shift]); flags(56, [])  // back to Chinese: the token in progress ends
+Thread.sleep(forTimeInterval: 3.2)  // past the undo window of the last word
+Learning.store.flush()
+let recorded = Set(Learning.store.entries().map(\.text))
+for (word, kept) in [("Hello", true), ("world", true), ("don't", true), ("foo.bar", false), ("x", false), ("v2", false), ("https://a.cn", false), ("worls", false)] {
+    let ok = recorded.contains(word) == kept
+    print((ok ? "ok   " : "FAIL ") + "English mode: \(word) \(kept ? "recorded" : "not recorded")"); if !ok { failures += 1 }
+}
+// Chinese mode: letters sent with Return are recorded when they are a word.
+client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+for c in "dialog" { key(String(c), code: 0) }
+key("\r", code: 36)
+let sent = client.text as String == "dialog"
+print((sent ? "ok   " : "FAIL ") + "Chinese mode: dialog + Return sends the letters"); if !sent { failures += 1 }
+key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+Thread.sleep(forTimeInterval: 3.2)
+Learning.store.flush()
+let learnedDialog = Learning.store.typedEnglish("dialog") == ["dialog"]
+print((learnedDialog ? "ok   " : "FAIL ") + "…and dialog is recorded, offered for its letters without switching to English"); if !learnedDialog { failures += 1 }
+// Learning records keep nothing sensitive: long numbers and addresses are taken out, and what follows
+// a prompt for a password or a code is not recorded.
+Learning.store.record(keys: "haode", text: "好的", context: "电话13812345678，邮箱a@b.cn，", undoWindow: 0)
+Learning.store.record(keys: "yiqi", text: "一起", context: "请输入验证码", undoWindow: 0)
+Learning.store.record(keys: "zaijian", text: "再见", context: "", undoWindow: 0)
+Learning.store.flush()
+let redactedContext = Learning.store.entries().first { $0.text == "好的" }?.context
+print((redactedContext == "电话＊，邮箱＊，" ? "ok   " : "FAIL ") + "learning record: number and e-mail taken out of the context (\(redactedContext ?? "-"))"); if redactedContext != "电话＊，邮箱＊，" { failures += 1 }
+let afterPrompt = Learning.store.entries().contains { $0.text == "一起" }
+print((!afterPrompt ? "ok   " : "FAIL ") + "learning record: nothing kept after a prompt for a code"); if afterPrompt { failures += 1 }
+let offered = Learning.store.typedEnglish("dont") == ["don't"]
+print((offered ? "ok   " : "FAIL ") + "a recorded English word is offered for its letters (dont → don't)"); if !offered { failures += 1 }
+key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+
 print(failures == 0 ? "ALL OK" : "\(failures) FAILURES")
 exit(failures == 0 ? 0 : 1)
