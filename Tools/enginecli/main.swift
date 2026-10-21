@@ -25,6 +25,8 @@ var vocabularyPath: String?
 var computeUnits = MLComputeUnits.cpuAndNeuralEngine
 var keystrokeEvalPath: String?
 var keystrokePages = 2  // pages of candidates the simulated user looks through (--pages)
+var fuzzyRules: Set<FuzzyRule> = []  // --fuzzy z-zh,n-l (the settings' 模糊音)
+var shuangpinLayout: ShuangpinLayout?  // --shuangpin xiaohe: --keystroke-eval types each syllable with its two keys
 var showFailures = false
 var noSlips = false
 var lexiconPath: String?
@@ -69,6 +71,8 @@ while let argument = arguments.popFirst() {
     case "--eval": evalPath = arguments.popFirst()
     case "--keystroke-eval": keystrokeEvalPath = arguments.popFirst()
     case "--pages": keystrokePages = arguments.popFirst().flatMap(Int.init) ?? keystrokePages
+    case "--shuangpin": shuangpinLayout = arguments.popFirst().flatMap(ShuangpinLayout.init(rawValue:))
+    case "--fuzzy": fuzzyRules = Set((arguments.popFirst() ?? "").split(separator: ",").compactMap { FuzzyRule(rawValue: String($0)) })
     case "--show-failures": showFailures = true
     case "--lexicon": lexiconPath = arguments.popFirst()
     case "--bigram": bigramPath = arguments.popFirst()
@@ -175,6 +179,8 @@ do {
     if let partialPenalty { decoder.partialPenalty = partialPenalty }
     if let wordPenalty { decoder.wordPenalty = wordPenalty }
     decoder.tolerant = !noSlips
+    if !fuzzyRules.isEmpty { decoder.setFuzzyRules(fuzzyRules) }
+    if let shuangpinLayout { InputSession.shuangpin = decoder.shuangpin(shuangpinLayout) }
     engine = decoder
     lexiconEngine = decoder
 }
@@ -442,9 +448,12 @@ if let keystrokeEvalPath {
         let expected = Array(fields[1])
         guard syllables.count == expected.count else { continue }
         let before = fields.count > 2 && !ignoreContext ? fields[2].replacingOccurrences(of: "\\n", with: "\n") : ""
+        // With --shuangpin each syllable is typed with its two keys.
+        let keyed: [String] = InputSession.shuangpin.map { layout in syllables.compactMap { layout.keys(for: $0) } } ?? syllables
+        guard keyed.count == syllables.count else { continue }
         let session = InputSession(decoder: engine)
         session.precedingText = before
-        let typed = syllables.joined()
+        let typed = keyed.joined()
         for letter in typed { session.insert(letter) }
         sentences += 1
         characters += expected.count
@@ -456,7 +465,7 @@ if let keystrokeEvalPath {
         while done < expected.count {
             let candidates = session.candidates
             // Letters consumed by the next k characters.
-            func lettersFor(_ k: Int) -> Int { syllables[done..<(done + k)].joined().count }
+            func lettersFor(_ k: Int) -> Int { keyed[done..<(done + k)].joined().count }
             var choice: (index: Int, length: Int)?
             for (index, candidate) in candidates.prefix(pageSize * pagesLooked).enumerated() {
                 let length = candidate.text.count

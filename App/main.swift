@@ -28,6 +28,8 @@ enum EngineHost {
                 decoder.typedEnglish = { Learning.enabled ? Learning.store.typedEnglish($0) : [] }
                 // Characters no font on this Mac has are not offered (they would show as a box).
                 decoder.canShow = CandidatePanel.canShow
+                decoder.setFuzzyRules(FuzzySettings.rules)
+                InputSession.shuangpin = ShuangpinSettings.layout.map { decoder.shuangpin($0) }
                 return decoder
             } catch {
                 NSLog("Typing: cannot open lexicon: \(error)")

@@ -320,6 +320,116 @@ Thread.sleep(forTimeInterval: 3.2)
 Learning.store.flush()
 let learnedDialog = Learning.store.typedEnglish("dialog") == ["dialog"]
 print((learnedDialog ? "ok   " : "FAIL ") + "…and dialog is recorded, offered for its letters without switching to English"); if !learnedDialog { failures += 1 }
+// 以词定字: [ and ] put the first or the last character of the highlighted word for all its letters;
+// nothing is learned from it (bianji does not spell 编).
+if let word = EngineHost.decoder?.decode("bianji", precedingText: "").refined().candidates.first?.text, word.count == 2 {
+    for c in "bianji" { key(String(c), code: 0) }; key("[", code: 33)
+    check("bianji, [ → \(word.first!) (first of \(word))", text: String(word.first!), cursor: 1)
+    for c in "bianji" { key(String(c), code: 0) }; key("]", code: 30)
+    check("bianji, ] → \(word.last!) (last of \(word))", text: String(word.last!), cursor: 1)
+    Thread.sleep(forTimeInterval: 3.2)
+    Learning.store.flush()
+    let learnedPick = Learning.store.entries().contains { $0.keys == "bianji" }
+    print((!learnedPick ? "ok   " : "FAIL ") + "a character picked out of a word is not recorded"); if learnedPick { failures += 1 }
+}
+if let first = EngineHost.decoder?.decode("ni", precedingText: "").refined().candidates.first?.text, first.count == 1 {
+    type("ni"); key("[", code: 33); check("ni, [ on one character → \(first)【 as before", text: first + "【", cursor: 2)
+}
+// 模糊音 from Settings: with z = zh, zidao offers 知道; off again, it does not.
+if let decoder = EngineHost.lexiconDecoder {
+    FuzzySettings.set(.zZh, on: true)
+    let with = decoder.decode("zidao", precedingText: "").refined().candidates.prefix(9).map(\.text)
+    FuzzySettings.set(.zZh, on: false)
+    let without = decoder.decode("zidao", precedingText: "").refined().candidates.prefix(9).map(\.text)
+    let ok = with.contains("知道") && !without.contains("知道") && FuzzySettings.rules.isEmpty
+    print((ok ? "ok   " : "FAIL ") + "模糊音 z = zh: zidao offers 知道 only while it is on"); if !ok { failures += 1 }
+}
+// lue and nue are lüe and nüe without any setting (zhanlue → 战略); u = ü lets nu stand for nv (女人).
+if let decoder = EngineHost.lexiconDecoder {
+    let lue = decoder.decode("zhanlue", precedingText: "").refined().candidates.first?.text == "战略"
+        && decoder.decode("nue", precedingText: "").refined().candidates.first?.text == "虐"
+    print((lue ? "ok   " : "FAIL ") + "zhanlue → 战略, nue → 虐 (lue and nue are lüe and nüe)"); if !lue { failures += 1 }
+    FuzzySettings.set(.uV, on: true)
+    let with = decoder.decode("nuren", precedingText: "").refined().candidates.prefix(9).map(\.text)
+    FuzzySettings.set(.uV, on: false)
+    let without = decoder.decode("nuren", precedingText: "").refined().candidates.prefix(9).map(\.text)
+    let ok = with.contains("女人") && !without.contains("女人") && FuzzySettings.rules.isEmpty
+    print((ok ? "ok   " : "FAIL ") + "模糊音 u = ü: nuren offers 女人 only while it is on"); if !ok { failures += 1 }
+}
+// Quick forms: v and a number, a sum or a code point; digits and signs go into the composition.
+func typeQuick(_ s: String) { for c in s { key(String(c), code: c == "-" ? 27 : c == "=" ? 24 : 0, shift: "*+()%^".contains(c)) } }
+typeQuick("v1234"); key(" ", code: SPACE); check("v1234, space → 一千二百三十四", text: "一千二百三十四", cursor: 7)
+typeQuick("v1234"); key("", code: RIGHT); key(" ", code: SPACE); check("v1234, →, space → 壹仟贰佰叁拾肆", text: "壹仟贰佰叁拾肆", cursor: 7)
+typeQuick("v12*3+5"); key(" ", code: SPACE); check("v12*3+5, space → 41", text: "41", cursor: 2)
+typeQuick("v10-3"); key(" ", code: SPACE); check("v10-3 (- is a minus here, no page) → 7", text: "7", cursor: 1)
+typeQuick("vu4e00"); key(" ", code: SPACE); check("vu4e00, space → 一", text: "一", cursor: 1)
+for c in "video" { key(String(c), code: 0) }; key("\r", code: 36); check("video stays letters (Return → video)", text: "video", cursor: 5)
+if let today = QuickInput.dynamic(forName: "日期").first, EngineHost.decoder?.decode("riqi", precedingText: "").refined().candidates.first?.text == "日期" {
+    for c in "riqi" { key(String(c), code: 0) }; key("", code: RIGHT); key(" ", code: SPACE)
+    check("riqi, →, space → today \(today)", text: today, cursor: today.count)
+}
+if let weekday = QuickInput.dynamic(forName: "星期").first, EngineHost.decoder?.decode("xingqi", precedingText: "").refined().candidates.first?.text == "星期" {
+    for c in "xingqi" { key(String(c), code: 0) }; key("", code: RIGHT); key(" ", code: SPACE)
+    check("xingqi, →, space → \(weekday)", text: weekday, cursor: weekday.count)
+}
+Thread.sleep(forTimeInterval: 3.2)
+Learning.store.flush()
+let learnedQuick = Learning.store.entries().contains { $0.keys.hasPrefix("v1234") || $0.text == "一千二百三十四" || $0.text.hasPrefix("星期") }
+print((!learnedQuick ? "ok   " : "FAIL ") + "quick results and today's weekday are not recorded"); if learnedQuick { failures += 1 }
+// Shift-Delete on a candidate takes back what was learned for it, as its tag in Settings does.
+Learning.store.record(keys: "shijie", text: "视界", context: "", undoWindow: 0)
+Learning.store.flush()
+if let index = EngineHost.decoder?.decode("shijie", precedingText: "").refined().candidates.prefix(9).firstIndex(where: { $0.text == "视界" }) {
+    for c in "shijie" { key(String(c), code: 0) }
+    for _ in 0..<index { key("", code: RIGHT) }
+    keyMods("", code: 51, [.shift])
+    let stillComposing = client.marked != nil
+    key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+    let forgotten = !Learning.store.entries().contains { $0.keys == "shijie" && $0.text == "视界" } && Learning.store.isHeld(keys: "shijie")
+    let ok = forgotten && stillComposing
+    print((ok ? "ok   " : "FAIL ") + "shijie, → to 视界, Shift-Delete → its record is gone and its keys held; still composing"); if !ok { failures += 1 }
+} else { print("skip Shift-Delete test: 视界 not on the first page of shijie") }
+// Shuangpin: two keys a syllable, decoded as the full pinyin they spell (Xiaohe nihc → ni'hao).
+if let decoder = EngineHost.lexiconDecoder, let nihao = decoder.decode("ni'hao", precedingText: "").refined().candidates.first?.text {
+    InputSession.shuangpin = decoder.shuangpin(.xiaohe)
+    for c in "nihc" { key(String(c), code: 0) }
+    let shown = client.text as String
+    key(" ", code: SPACE)
+    check("小鹤 nihc shows \"\(shown)\", space → \(nihao)", text: nihao, cursor: nihao.count)
+    print((shown == "ni hao" ? "ok   " : "FAIL ") + "小鹤 nihc is shown as ni hao: \"\(shown)\""); if shown != "ni hao" { failures += 1 }
+    Thread.sleep(forTimeInterval: 3.2)
+    Learning.store.flush()
+    let byPinyin = Learning.store.entries().contains { $0.keys == "nihao" && $0.text == nihao }
+    print((byPinyin ? "ok   " : "FAIL ") + "小鹤 nihc is learned by its full pinyin nihao"); if !byPinyin { failures += 1 }
+    typeQuick("v1234"); key(" ", code: SPACE); check("小鹤 v1234 is still a quick form → 一千二百三十四", text: "一千二百三十四", cursor: 7)
+    // vu is zhu in Xiaohe: a digit after it picks a candidate (no code point), capitals stay as typed.
+    let zhu = decoder.decode("zhu", precedingText: "").refined().candidates.map(\.text)
+    if zhu.count > 1 {
+        for c in "vu" { key(String(c), code: 0) }; key("2", code: 19)
+        check("小鹤 vu, 2 → \(zhu[1]) (the second candidate of zhu)", text: zhu[1], cursor: zhu[1].count)
+    }
+    for c in "dv" { key(String(c), code: 0) }; key("P", code: 35, shift: true); key("C", code: 8, shift: true)
+    let withCapitals = client.text as String
+    key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+    print((withCapitals.hasPrefix("dui PC") ? "ok   " : "FAIL ") + "小鹤 dv then PC is read dui PC: \"\(withCapitals)\""); if !withCapitals.hasPrefix("dui PC") { failures += 1 }
+    InputSession.shuangpin = decoder.shuangpin(.microsoft)
+    if let xing = decoder.decode("xing", precedingText: "").refined().candidates.first?.text {
+        key("x", code: 7); key(";", code: 41); key(" ", code: SPACE)
+        check("微软 x; (ing on ;) → \(xing)", text: xing, cursor: xing.count)
+        // After a whole syllable ; is the mark again: nihk; is 你好 and "；".
+        for c in "nihk" { key(String(c), code: 0) }; key(";", code: 41)
+        let afterSyllable = client.text as String
+        key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+        print((afterSyllable.hasSuffix("；") ? "ok   " : "FAIL ") + "微软 nihk then ; → the mark after the syllables: \"\(afterSyllable)\""); if !afterSyllable.hasSuffix("；") { failures += 1 }
+    }
+    // Sogou (rime-ice): a and e finals also as that letter and the final's key (aj → an), ing on ;.
+    InputSession.shuangpin = decoder.shuangpin(.sogou)
+    if let an = decoder.decode("an", precedingText: "").refined().candidates.first?.text {
+        for c in "aj" { key(String(c), code: 0) }; key(" ", code: SPACE)
+        check("搜狗 aj → \(an) (an)", text: an, cursor: an.count)
+    }
+    InputSession.shuangpin = nil
+}
 // Learning records keep nothing sensitive: long numbers and addresses are taken out, and what follows
 // a prompt for a password or a code is not recorded.
 Learning.store.record(keys: "haode", text: "好的", context: "电话13812345678，邮箱a@b.cn，", undoWindow: 0)

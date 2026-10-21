@@ -2,8 +2,9 @@ import Foundation
 
 /// Pairs of sounds the user may ask to be treated as interchangeable.
 public enum FuzzyRule: String, CaseIterable {
-    case zZh = "z-zh", cCh = "c-ch", sSh = "s-sh", nL = "n-l"
-    case anAng = "an-ang", enEng = "en-eng", inIng = "in-ing"
+    case zZh = "z-zh", cCh = "c-ch", sSh = "s-sh", nL = "n-l", lR = "l-r", fH = "f-h"
+    case anAng = "an-ang", ianIang = "ian-iang", uanUang = "uan-uang", enEng = "en-eng", inIng = "in-ing"
+    case uV = "u-v"
 
     /// How the rule reads in the settings window.
     public var label: String {
@@ -12,9 +13,14 @@ public enum FuzzyRule: String, CaseIterable {
         case .cCh: return "c = ch"
         case .sSh: return "s = sh"
         case .nL: return "n = l"
+        case .lR: return "l = r"
+        case .fH: return "f = h"
         case .anAng: return "an = ang"
+        case .ianIang: return "ian = iang"
+        case .uanUang: return "uan = uang"
         case .enEng: return "en = eng"
         case .inIng: return "in = ing"
+        case .uV: return "u = ü"
         }
     }
 }
@@ -32,6 +38,9 @@ struct SyllableMatcher {
     static let maxTypedLength = 7
 
     private let syllables: Set<String>
+    /// Other spellings of a syllable, always read as it: lue and nue for lüe and nüe (略, 虐),
+    /// as most people write them.
+    private var spellings: [String: [Match]] = [:]
     private var fuzzy: [String: [Match]] = [:]
     private var typos: [String: [Match]] = [:]
 
@@ -71,8 +80,12 @@ struct SyllableMatcher {
 
     init(syllables: Set<String>, fuzzyRules: Set<FuzzyRule>) {
         self.syllables = syllables
+        for syllable in ["lve", "nve"] where syllables.contains(syllable) {
+            spellings[syllable.replacingOccurrences(of: "v", with: "u"), default: []].append(Match(syllable: syllable, penalty: 0))
+        }
         for syllable in syllables {
-            for variant in Self.fuzzyVariants(of: syllable, rules: fuzzyRules) where variant != syllable {
+            for variant in Self.fuzzyVariants(of: syllable, rules: fuzzyRules, syllables: syllables) where variant != syllable
+                && !(spellings[variant]?.contains { $0.syllable == syllable } ?? false) {
                 fuzzy[variant, default: []].append(Match(syllable: syllable, penalty: Self.fuzzyPenalty))
             }
             for (variant, slipPenalty) in Self.typoVariants(of: syllable) where variant != syllable {
@@ -97,22 +110,32 @@ struct SyllableMatcher {
     func matches(_ typed: String, tolerant: Bool) -> [Match] {
         var result: [Match] = []
         if syllables.contains(typed) { result.append(Match(syllable: typed, penalty: 0)) }
+        if let other = spellings[typed] { result += other }
         if let alternatives = fuzzy[typed] { result += alternatives }
         if tolerant, let corrections = typos[typed] { result += corrections }
         return result
     }
 
-    private static func fuzzyVariants(of syllable: String, rules: Set<FuzzyRule>) -> Set<String> {
+    private static func fuzzyVariants(of syllable: String, rules: Set<FuzzyRule>, syllables: Set<String>) -> Set<String> {
         var initials: [(String, String)] = []
         if rules.contains(.zZh) { initials.append(("z", "zh")) }
         if rules.contains(.cCh) { initials.append(("c", "ch")) }
         if rules.contains(.sSh) { initials.append(("s", "sh")) }
-        var finals: [(String, String)] = []
-        if rules.contains(.anAng) { finals.append(("an", "ang")) }
-        if rules.contains(.enEng) { finals.append(("en", "eng")) }
-        if rules.contains(.inIng) { finals.append(("in", "ing")) }
-
+        // Finals that sound alike; an/ang only after an initial (lan, zhang), not inside ian or uan,
+        // which are rules of their own.
+        var finals: [(front: String, back: String, notAfter: Set<Character>)] = []
+        if rules.contains(.anAng) { finals.append(("an", "ang", ["i", "u"])) }
+        if rules.contains(.ianIang) { finals.append(("ian", "iang", [])) }
+        if rules.contains(.uanUang) { finals.append(("uan", "uang", [])) }
+        if rules.contains(.enEng) { finals.append(("en", "eng", [])) }
+        if rules.contains(.inIng) { finals.append(("in", "ing", [])) }
+        // ü written u after n and l: nu for nv (女), lu for lv (绿), and the other way.
         var heads: Set<String> = [syllable]
+        if rules.contains(.uV), syllable.hasPrefix("n") || syllable.hasPrefix("l") {
+            let other = syllable.contains("v") ? syllable.replacingOccurrences(of: "v", with: "u") : syllable.replacingOccurrences(of: "u", with: "v")
+            if syllable.contains("v") || syllables.contains(other) { heads.insert(other) }
+        }
+
         for (plain, retroflex) in initials {
             if syllable.hasPrefix(retroflex) {
                 heads.insert(plain + syllable.dropFirst(retroflex.count))
@@ -120,16 +143,17 @@ struct SyllableMatcher {
                 heads.insert(retroflex + syllable.dropFirst(plain.count))
             }
         }
-        if rules.contains(.nL) {
-            if syllable.hasPrefix("n") { heads.insert("l" + syllable.dropFirst()) }
-            if syllable.hasPrefix("l") { heads.insert("n" + syllable.dropFirst()) }
+        // Single-letter initials that sound alike (n/l, l/r, f/h).
+        for (rule, one, other) in [(FuzzyRule.nL, "n", "l"), (.lR, "l", "r"), (.fH, "f", "h")] where rules.contains(rule) {
+            if syllable.hasPrefix(one) { heads.insert(other + syllable.dropFirst()) }
+            if syllable.hasPrefix(other) { heads.insert(one + syllable.dropFirst()) }
         }
         var result = heads
         for head in heads {
-            for (front, back) in finals {
-                if head.hasSuffix(back) {
+            for (front, back, notAfter) in finals {
+                if head.hasSuffix(back), !(head.dropLast(back.count).last.map(notAfter.contains) ?? false) {
                     result.insert(String(head.dropLast()))
-                } else if head.hasSuffix(front) {
+                } else if head.hasSuffix(front), !head.hasSuffix(back), !(head.dropLast(front.count).last.map(notAfter.contains) ?? false) {
                     result.insert(head + "g")
                 }
             }

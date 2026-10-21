@@ -12,7 +12,7 @@ import Foundation
 /// context that difference is zero, so the lexicon's order stands, as the standard asks.
 public final class LexiconDecoder: CandidateDecoding {
     private let lexicon: Lexicon
-    private let matcher: SyllableMatcher
+    private var matcher: SyllableMatcher
     private var scorer: SentenceScorer?
     /// Swaps the language model (e.g. for one that has learned on this machine).
     public func replaceScorer(_ newScorer: SentenceScorer?) {
@@ -134,6 +134,22 @@ public final class LexiconDecoder: CandidateDecoding {
         matcher = SyllableMatcher(syllables: lexicon.syllables, fuzzyRules: fuzzyRules)
     }
 
+    /// Every syllable the lexicon knows (what a shuangpin layout's table is built for).
+    public var syllables: Set<String> { lexicon.syllables }
+
+    /// A shuangpin layout's table for this lexicon's syllables and their frequencies.
+    public func shuangpin(_ layout: ShuangpinLayout) -> Shuangpin {
+        Shuangpin(layout, syllables: lexicon.syllables, weights: lexicon.syllableWeights())
+    }
+
+    /// Sounds the person treats as the same (z = zh, n = l, ...), from Settings; the next
+    /// keystroke reads with them.
+    public func setFuzzyRules(_ rules: Set<FuzzyRule>) {
+        lock.lock(); defer { lock.unlock() }
+        matcher = SyllableMatcher(syllables: lexicon.syllables, fuzzyRules: rules)
+        runCaches.removeAll()
+    }
+
     /// Lead (log-probability) of the lexicon's best reading over the second at which the model is
     /// not consulted; 0 always consults it.
     public var skipMargin = 0.0
@@ -212,6 +228,11 @@ public final class LexiconDecoder: CandidateDecoding {
         let chars = Array(input.utf8)
         guard !chars.isEmpty else { return .empty }
         decodeCount += 1
+        // v and a number, a sum or a code point: the result, not pinyin (QuickInput).
+        if QuickInput.isQuick(input) {
+            let results = QuickInput.candidates(for: input).filter { showable($0) }
+            return DecodeResult(candidates: results.map { Candidate(text: $0, consumed: chars.count, words: []) }, sentences: [], segmented: input)
+        }
         // The buffer is read literally first; a reading that needs a slip of the finger replaces
         // it only when it reads more of the buffer or is clearly the better explanation.
         let strict = run(chars, tolerant: false)
@@ -342,8 +363,8 @@ public final class LexiconDecoder: CandidateDecoding {
             shown.candidates = result.candidates.filter { showable($0.text) }
         }
         shown = chinesePriority(shown)
-        let names = lexicon.symbolNames
-        guard !names.isEmpty, let whole = shown.candidates.map(\.consumed).max(),
+        let names = lexicon.symbolNames.union(QuickInput.dateNames)
+        guard let whole = shown.candidates.map(\.consumed).max(),
               shown.candidates.contains(where: { $0.consumed == whole && names.contains($0.text) }) else { return shown }
         var withMarks: [Candidate] = []
         var named = Set<String>(), marks = Set<String>()
@@ -351,8 +372,10 @@ public final class LexiconDecoder: CandidateDecoding {
             withMarks.append(candidate)
             guard candidate.consumed == whole, names.contains(candidate.text), candidate.words.count == 1,
                   let word = candidate.words.first, word.wid != 0, named.insert(candidate.text).inserted else { continue }
-            for mark in lexicon.symbols(named: candidate.text, key: word.key) where showable(mark) && marks.insert(mark).inserted {
-                withMarks.append(Candidate(text: mark, consumed: candidate.consumed, words: [WordRef(text: mark, wid: 0, key: word.key)], score: candidate.score))
+            let following = QuickInput.dateNames.contains(candidate.text) ? QuickInput.dynamic(forName: candidate.text) : lexicon.symbols(named: candidate.text, key: word.key)
+            // No words: a mark or today's date is no reading to learn (星期二 is wrong tomorrow).
+            for mark in following where showable(mark) && marks.insert(mark).inserted {
+                withMarks.append(Candidate(text: mark, consumed: candidate.consumed, words: [], score: candidate.score))
             }
         }
         shown.candidates = withMarks

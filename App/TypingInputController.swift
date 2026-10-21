@@ -43,6 +43,7 @@ class TypingInputController: IMKInputController {
 
     private enum Key {
         static let returnKey: UInt16 = 36, tab: UInt16 = 48, space: UInt16 = 49, delete: UInt16 = 51, escape: UInt16 = 53, capsLock: UInt16 = 57
+        static let forwardDelete: UInt16 = 117
         static let enter: UInt16 = 76
         static let pageUp: UInt16 = 116, pageDown: UInt16 = 121
         static let left: UInt16 = 123, right: UInt16 = 124, down: UInt16 = 125, up: UInt16 = 126
@@ -251,6 +252,19 @@ class TypingInputController: IMKInputController {
         case Key.returnKey, Key.enter:
             sendLetters(client)
             return true
+        case Key.delete where event.modifierFlags.contains(.shift), Key.forwardDelete where event.modifierFlags.contains(.shift):
+            // Shift-Delete on a candidate: what was learned for it is taken back, as with its tag in
+            // Settings; the candidates are read again without it.
+            let index = page * Self.pageSize + highlight
+            if session.candidates.indices.contains(index) {
+                let candidate = session.candidates[index]
+                Learning.undo(keys: session.pinyinKeys(consumed: candidate.consumed), word: candidate.text)
+                session.refreshCandidates()
+                page = 0
+                highlight = 0
+                updateUI(client)
+            }
+            return true
         case Key.delete:
             session.backspace()
             page = 0
@@ -282,7 +296,38 @@ class TypingInputController: IMKInputController {
         }
 
         guard let character else { return true }
+        // Shuangpin layouts that give ";" a final (ing in Microsoft and Sogou): after an initial key it
+        // is the syllable's second key, not a mark.
+        if character == ";", let layout = InputSession.shuangpin, layout.usesSemicolon, layout.waitsForFinal(session.remaining) {
+            session.insert(";")
+            page = 0
+            highlight = 0
+            updateUI(client)
+            return true
+        }
+        // v and a number, a sum or a code point (QuickInput): digits and signs are part of it, not
+        // candidate numbers or marks.
+        if QuickInput.accepts(character, after: session.rawText) {
+            session.insert(character)
+            page = 0
+            highlight = 0
+            updateUI(client)
+            return true
+        }
+        // 以词定字: [ and ] take the first and the last character of the highlighted word.
+        let current = page * Self.pageSize + highlight
+        let pickable = session.candidates.indices.contains(current) && session.candidates[current].text.count > 1
+            && session.candidates[current].text.unicodeScalars.allSatisfy { Self.isHanzi($0) }
         switch character {
+        case "[" where pickable, "]" where pickable:
+            // Its letters stand for the whole word, so what is picked is no reading to learn.
+            if let text = session.selectCharacter(current, last: character == "]") {
+                commit(text, client: client, learned: false)
+            } else {
+                page = 0
+                highlight = 0
+                updateUI(client)
+            }
         case "'":
             session.insert("'")
             page = 0
@@ -336,6 +381,10 @@ class TypingInputController: IMKInputController {
         }
     }
 
+    private static func isHanzi(_ scalar: Unicode.Scalar) -> Bool {
+        (0x4E00...0x9FFF).contains(scalar.value) || (0x3400...0x4DBF).contains(scalar.value) || scalar.value >= 0x20000
+    }
+
     // MARK: - Marks
 
     /// A punctuation key in Chinese mode: its Chinese mark goes into the text, as the system's
@@ -377,7 +426,7 @@ class TypingInputController: IMKInputController {
 
     private func select(_ index: Int, client: IMKTextInput) {
         if let text = session.select(index) {
-            commit(text, client: client)
+            commit(text, client: client, learned: !session.lastCommitNotLearned)
         } else {
             page = 0
             highlight = 0

@@ -20,6 +20,19 @@ public final class InputSession {
 
     private static let maxBufferLength = 80
 
+    /// The shuangpin layout in use for every composition, nil for full pinyin (set from Settings).
+    public static var shuangpin: Shuangpin?
+
+    /// The full pinyin the keys spell (the keys themselves without shuangpin), "'" left out: what
+    /// learning records them by.
+    public static func pinyinKeys(_ keys: String) -> String {
+        let pinyin = shuangpin.map { $0.read(keys).pinyin } ?? keys
+        return pinyin.replacingOccurrences(of: "'", with: "")
+    }
+
+    /// The full pinyin of the first `consumed` keys still being composed.
+    public func pinyinKeys(consumed: Int) -> String { Self.pinyinKeys(String(remaining.prefix(consumed))) }
+
     public init(decoder: CandidateDecoding?) {
         self.decoder = decoder
     }
@@ -70,8 +83,9 @@ public final class InputSession {
         remaining.removeFirst(candidate.consumed)
         if remaining.isEmpty {
             let text = rawText
-            lastCommittedKeys = confirmed.map(\.raw).joined().replacingOccurrences(of: "'", with: "")
+            lastCommittedKeys = confirmed.map { Self.pinyinKeys($0.raw) }.joined()
             lastCommittedContext = precedingText
+            lastCommitNotLearned = pickedCharacter || confirmed.contains { $0.candidate.words.isEmpty }
             reset()
             return text
         }
@@ -79,17 +93,54 @@ public final class InputSession {
         return nil
     }
 
+    /// Picks one character of a candidate for all the letters the candidate stands for (以词定字:
+    /// the first or the last character of 编辑 for bianji). Returns the full text once the whole
+    /// buffer is converted, as `select` does.
+    public func selectCharacter(_ index: Int, last: Bool) -> String? {
+        guard result.candidates.indices.contains(index) else { return nil }
+        let candidate = result.candidates[index]
+        guard let character = last ? candidate.text.last : candidate.text.first else { return nil }
+        let picked = Candidate(text: String(character), consumed: candidate.consumed, words: [], score: candidate.score)
+        confirmed.append((picked, String(remaining.prefix(candidate.consumed))))
+        remaining.removeFirst(candidate.consumed)
+        pickedCharacter = true
+        if remaining.isEmpty {
+            let text = rawText
+            lastCommittedKeys = confirmed.map { Self.pinyinKeys($0.raw) }.joined()
+            lastCommittedContext = precedingText
+            lastCommitNotLearned = true
+            reset()
+            return text
+        }
+        refresh()
+        return nil
+    }
+    /// Whether the composition committed last is no reading to learn: a character picked out of a
+    /// word (its letters spell the word) or a quick result (v1234 → 壹仟贰佰叁拾肆).
+    public private(set) var lastCommitNotLearned = false
+    private var pickedCharacter = false
+
     /// Drops the composition without committing anything.
     public func reset() {
+        pickedCharacter = false
         confirmed.removeAll()
         remaining = ""
         result = .empty
         generation += 1
     }
 
+    /// Reads the letters again (after what was learned for them changed).
+    public func refreshCandidates() { refresh() }
+
     private func refresh() {
         let before = precedingText + confirmed.map(\.candidate.text).joined()
-        result = decoder?.decode(remaining, precedingText: before) ?? .empty
+        if let shuangpin = Self.shuangpin, !QuickInput.isQuick(remaining) {
+            // Two keys a syllable: decoded as the full pinyin they spell, lengths given back in keys.
+            let (pinyin, keysAt) = shuangpin.read(remaining)
+            result = Self.inKeys(decoder?.decode(pinyin, precedingText: before) ?? .empty, keysAt: keysAt)
+        } else {
+            result = decoder?.decode(remaining, precedingText: before) ?? .empty
+        }
         generation += 1
         guard let refine = result.refine else { return }
         // Show the quick result first; the slower look (the model's rerank) runs off the main
@@ -109,4 +160,20 @@ public final class InputSession {
     }
 
     private static let refineQueue = DispatchQueue(label: "typing.refine", qos: .userInteractive)
+
+    /// A result decoded from the full pinyin of shuangpin keys, its lengths counted in keys again
+    /// and its syllables shown apart (ni hao); so is the result of its second look.
+    private static func inKeys(_ result: DecodeResult, keysAt: [Int]) -> DecodeResult {
+        func keys(_ candidate: Candidate) -> Candidate {
+            var copy = Candidate(text: candidate.text, consumed: keysAt[min(candidate.consumed, keysAt.count - 1)],
+                                 words: candidate.words, score: candidate.score)
+            copy.penalty = candidate.penalty
+            return copy
+        }
+        let refine = result.refine.map { look in
+            { (isCancelled: @escaping () -> Bool) -> DecodeResult? in look(isCancelled).map { inKeys($0, keysAt: keysAt) } }
+        }
+        return DecodeResult(candidates: result.candidates.map(keys), sentences: result.sentences.map(keys),
+                            segmented: result.segmented.replacingOccurrences(of: "'", with: " "), refine: refine)
+    }
 }

@@ -236,6 +236,7 @@ struct SettingsRootView: View {
     /// A grouped form: the system draws the cards, row insets and separators, each macOS in its own style.
     var body: some View {
         Form {
+            InputMethodSection()
             ShortcutsSection()
             learningGroup
             dataGroup
@@ -420,6 +421,78 @@ final class ShortcutRecorder: ObservableObject {
 
 /// The key bindings: each function lists its keys as tags; "添加…" records the next key pressed
 /// (a key with modifiers, or a modifier key alone), Esc cancels.
+/// Sounds the person treats as the same while typing pinyin (z = zh, n = l, ...); all off by
+/// default, as in the system's Pinyin. Kept as "z-zh,n-l" in the defaults.
+enum FuzzySettings {
+    static let key = "FuzzyRules"
+    static var rules: Set<FuzzyRule> {
+        Set((UserDefaults.standard.string(forKey: key) ?? "").split(separator: ",").compactMap { FuzzyRule(rawValue: String($0)) })
+    }
+    static func set(_ rule: FuzzyRule, on: Bool) {
+        var chosen = rules
+        if on { chosen.insert(rule) } else { chosen.remove(rule) }
+        UserDefaults.standard.set(chosen.map(\.rawValue).sorted().joined(separator: ","), forKey: key)
+        EngineHost.lexiconDecoder?.setFuzzyRules(chosen)
+    }
+}
+
+/// Full pinyin or one of the shuangpin layouts, kept by name in the defaults ("" for full pinyin);
+/// the layout chosen is kept apart, so turning shuangpin off and on again keeps it.
+enum ShuangpinSettings {
+    static let key = "Shuangpin"
+    static let choiceKey = "ShuangpinChoice"
+    static var layout: ShuangpinLayout? { UserDefaults.standard.string(forKey: key).flatMap(ShuangpinLayout.init(rawValue:)) }
+    /// Makes the stored layout the one every composition reads with.
+    static func apply() {
+        InputSession.shuangpin = layout.flatMap { EngineHost.lexiconDecoder?.shuangpin($0) }
+    }
+}
+
+/// 输入方式: shuangpin on or off and its layout, and the sounds treated as the same.
+struct InputMethodSection: View {
+    @AppStorage(FuzzySettings.key) private var fuzzy = ""
+    @AppStorage(ShuangpinSettings.key) private var shuangpin = ""
+    @AppStorage(ShuangpinSettings.choiceKey) private var choice = ShuangpinLayout.xiaohe.rawValue
+
+    /// The fuzzy rules four to a row, in columns.
+    private static let rows: [[FuzzyRule]] = stride(from: 0, to: FuzzyRule.allCases.count, by: 4).map {
+        Array(FuzzyRule.allCases[$0..<min($0 + 4, FuzzyRule.allCases.count)])
+    }
+    private var usesShuangpin: Bool { ShuangpinLayout(rawValue: shuangpin) != nil }
+
+    var body: some View {
+        Section("输入方式") {
+            Toggle("使用双拼", isOn: Binding(get: { usesShuangpin }, set: {
+                shuangpin = $0 ? (ShuangpinLayout(rawValue: choice) ?? .xiaohe).rawValue : ""
+                ShuangpinSettings.apply()
+            }))
+            // Always shown; it can be changed only while shuangpin is on.
+            Picker("双拼方案", selection: Binding(get: { ShuangpinLayout(rawValue: choice) != nil ? choice : ShuangpinLayout.xiaohe.rawValue }, set: {
+                choice = $0
+                if usesShuangpin { shuangpin = $0; ShuangpinSettings.apply() }
+            })) {
+                ForEach(ShuangpinLayout.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+            }
+            .disabled(!usesShuangpin)
+            LabeledContent("模糊音") {
+                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                    ForEach(Self.rows, id: \.self) { row in
+                        GridRow {
+                            ForEach(row, id: \.self) { rule in
+                                Toggle(rule.label, isOn: Binding(
+                                    get: { fuzzy.split(separator: ",").contains { $0 == rule.rawValue } },
+                                    set: { FuzzySettings.set(rule, on: $0) }))
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                    }
+                }
+            }
+            Text("打拼音时把勾选的两个音当作一样，比如勾选 z = zh 后，打 zi 也能出“知”").font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
 struct ShortcutsSection: View {
     @ObservedObject private var store = ShortcutStore.shared
     @StateObject private var recorder = ShortcutRecorder()

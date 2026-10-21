@@ -153,6 +153,19 @@ public final class Lexicon {
         return result
     }
 
+    /// How many characters each syllable has (which syllable two shuangpin keys stand for when two
+    /// could: luo, with 罗 落 洛 络 …, rather than lo, whose 咯 is read luo as well).
+    public func syllableWeights() -> [String: Double] {
+        queryLock.lock(); defer { queryLock.unlock() }
+        var weights: [String: Double] = [:]
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT key, COUNT(*) FROM lexicon WHERE n = 1 GROUP BY key", -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW { weights[String(cString: sqlite3_column_text(stmt, 0))] = sqlite3_column_double(stmt, 1) }
+        }
+        sqlite3_finalize(stmt)
+        return weights
+    }
+
     /// The marks typed by the name `name` read `key` (引号 yin'hao: 「」『』…), in their order.
     public func symbols(named name: String, key: String) -> [String] {
         queryLock.lock(); defer { queryLock.unlock() }
