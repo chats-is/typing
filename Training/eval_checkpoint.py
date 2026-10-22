@@ -3,7 +3,7 @@
 engine's lattice readings of the word tests (enginecli --no-rerank --dump-lattice) the way the engine
 does and report the first-choice rate.
 
-    venv/bin/python Training/eval_checkpoint.py --model Data/lm9/model.pt --vocab Data/lm9/vocab.json \
+    venv/bin/python Training/eval_checkpoint.py --model Data/clean2/model.pt --vocab Data/prepared-clean/vocab.json \
         Data/wordlattice/word_mixed.lattice.tsv Data/wordlattice/word_full.lattice.tsv [--rows 32]
 """
 import argparse

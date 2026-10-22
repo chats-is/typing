@@ -2,7 +2,7 @@
 """Dump a GPT checkpoint's weights as one little-endian fp16 blob with a JSON header, the form the
 on-device runtime (MPSGraph) loads for inference and for learning the top blocks.
 
-    Data/venv-train/bin/python Training/export_weights.py Data/lm9/model.pt Data/lm9/weights
+    Data/venv-train/bin/python Training/export_weights.py Data/clean2/model.pt Data/clean2/weights
 
 Writes <out>.json ({"config": {...}, "tensors": [{"name", "shape", "offset", "count"}]}) and
 <out>.bin (fp16 values, tensor after tensor in header order; offsets in elements).

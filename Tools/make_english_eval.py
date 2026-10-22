@@ -2,7 +2,7 @@
 """Write Data/eval_english_mix.tsv: Chinese text with an English word in it, typed in one go.
 
     Data/venv-train/bin/python Tools/make_english_eval.py [--data Data/holdout]
-    Data/venv-train/bin/python Tools/make_english_eval.py --data Data/lm9 --cased
+    Data/venv-train/bin/python Tools/make_english_eval.py --data Data/prepared-clean --cased
 
 The sentences come from the held-out text of prepare_data.py (news, mixed, forum, dialogue),
 which the model never trains on. Two patterns, in the fourth column:

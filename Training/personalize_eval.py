@@ -2,9 +2,9 @@
 """Level-4 verification: does tuning the language model on what one person typed earlier make
 their later input come out right more often, without hurting everyone's input?
 
-    venv/bin/python Training/personalize_eval.py --model Data/lm9/model.pt --vocab Data/lm9/vocab.json \
+    venv/bin/python Training/personalize_eval.py --model Data/clean2/model.pt --vocab Data/prepared-clean/vocab.json \
         --train Data/personal/forum2.train.txt --eval Data/personal/forum2.lattice.tsv \
-        --control Data/personal/dialogue.lattice.tsv --steps 400 --eval-every 100
+        --control Resources/general_lattices.tsv --steps 400 --eval-every 100
 
 --eval / --control are lattice dumps from `enginecli --no-rerank --dump-lattice`: every line holds
 the typed letters, the right sentence, the preceding text and the lattice's readings as

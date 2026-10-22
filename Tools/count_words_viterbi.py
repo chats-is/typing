@@ -33,7 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "Training"))
 from count_words import SAMPLE, WEIGHTS  # noqa: E402
 
-DATA = os.path.join(ROOT, "Data", "lm9")
+DATA = os.path.join(ROOT, "Data", "prepared-clean")
 TABLE = os.path.join(ROOT, "Data", "lexicons", "all_words.tsv")
 LEXICON = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
 MAX_WORD = 4

@@ -1,5 +1,5 @@
 #!/bin/bash
-# The gate before anything is installed: word tests, sentence sets, a learning session, per-key
+# The gate before anything is installed: word tests, sentence sets, fresh sets, a learning session, per-key
 # timing, pacing, concurrency, key handling. Nothing may come out lower than docs/benchmarks.md.
 # Usage: Scripts/gate.sh [extra eval file ...]   (e.g. a private replay file)
 set -euo pipefail
@@ -18,6 +18,11 @@ echo "== sentence sets (300 each)"
 for f in Data/eval_dialogue.tsv Data/eval_news.tsv Data/eval_forum.tsv Data/eval_touchpal.tsv Data/eval_short.tsv; do
     printf '%-32s ' "$(basename "$f")"
     "$E" "${C[@]}" --eval "$f" --limit 300 2>/dev/null | grep "sentences:" | sed -E 's/ +among best.*//'
+done
+echo "== fresh sets (cleaned held-out text, nothing seen in training, never tuned on: these decide between models)"
+for f in Data/fresh/eval_*.tsv; do
+    printf '%-32s ' "fresh/$(basename "$f")"
+    "$E" "${C[@]}" --eval "$f" 2>/dev/null | grep "sentences:" | sed -E 's/ +among best.*//'
 done
 echo "== learning session (GPU)"
 "$E" "${C[@]}" --graph-scorer "$R/LanguageModel.mlmodelc" --learn-demo forum2 2>/dev/null | grep "session:"

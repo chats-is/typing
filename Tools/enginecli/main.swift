@@ -299,7 +299,7 @@ if let learnDemo, let lexiconEngine, let graphWeightsPath {
     }
     store.flush()
     print("store: \(store.count) entries in \(directory.path)")
-    let general = URL(fileURLWithPath: "Data/personal/dialogue.lattice.tsv")
+    let general = URL(fileURLWithPath: "Resources/general_lattices.tsv")  // the check the input method ships
     let learnerSource: GraphScorer.WeightsSource = graphWeightsPath.hasSuffix(".mlmodelc")
         ? .compiledModel(URL(fileURLWithPath: graphWeightsPath), positions: URL(fileURLWithPath: "Resources/positions.bin"), header: URL(fileURLWithPath: "Resources/weights.json"))
         : .files(base: graphWeightsPath)

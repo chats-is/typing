@@ -29,7 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "Training"))
 from count_words import SAMPLE, WEIGHTS  # noqa: E402
 
-DATA = os.path.join(ROOT, "Data", "lm9")
+DATA = os.path.join(ROOT, "Data", "prepared-clean")
 LEXICON = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
 OUT = os.path.join(ROOT, "Data", "lexicon", "bigram.bin")
 MAX_WORD_CHARS = 4

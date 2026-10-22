@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train the language model on the Mac's GPU.
 
-    Data/venv-train/bin/python Training/train.py --data Data/lm9 --out Data/lm9/model.pt --init Data/base/lm3_model.pt --lr 5e-5 --steps 6000
+    Data/venv-train/bin/python Training/train.py --data Data/prepared-clean --out Data/run1/model.pt --steps 80000   (the shipped recipe: Training/train_base.sh)
 
 --data is a directory written by prepare_data.py. Every batch mixes its sources in the
 proportions given by sources.json. Stops after --steps (or --hours), saving a checkpoint every
@@ -47,7 +47,7 @@ def batch_from(sources, weights, batch_size, block_size, device, generator):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm9"))
+    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "prepared-clean"))
     parser.add_argument("--out", required=True)
     parser.add_argument("--layers", type=int, default=8)
     parser.add_argument("--heads", type=int, default=8)

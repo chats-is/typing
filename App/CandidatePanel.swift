@@ -56,7 +56,7 @@ final class CandidatePanel: NSPanel {
 
     /// The capsule behind the candidates: Liquid Glass on macOS 26 (needs the macOS 26 SDK, i.e.
     /// Swift 6.2 or newer to compile), the popover material otherwise.
-    private static func makeBacking(for container: NSView) -> NSView {
+    static func makeBacking(for container: NSView) -> NSView {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
@@ -73,7 +73,7 @@ final class CandidatePanel: NSPanel {
         return effect
     }
 
-    private static func round(_ backing: NSView, radius: CGFloat) {
+    static func round(_ backing: NSView, radius: CGFloat) {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *), let glass = backing as? NSGlassEffectView {
             glass.cornerRadius = radius

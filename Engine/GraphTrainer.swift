@@ -21,6 +21,8 @@ public final class GraphTrainer {
     private let loss: MPSGraphTensor
     private let updates: [MPSGraphOperation]
     private var variables: [(name: String, tensor: MPSGraphTensor, shape: [Int])] = []
+    /// The frozen weights, fed from GPU buffers (as in GraphScorer: constants are written to disk).
+    private let frozen: [MPSGraphTensor: MPSGraphTensorData]
     private var stepCount = 0
     private var stepExecutable: MPSGraphExecutable?
     private var readExecutable: MPSGraphExecutable?
@@ -47,6 +49,13 @@ public final class GraphTrainer {
             return (Data(bytes: &out, count: count * 4), tensor.shape)
         }
         var variables: [(name: String, tensor: MPSGraphTensor, shape: [Int])] = []
+        var frozen: [MPSGraphTensor: MPSGraphTensorData] = [:]
+        func fed(_ data: Data, _ s: [Int], _ name: String) throws -> MPSGraphTensor {
+            let input = graph.placeholder(shape: shape(s), dataType: .float32, name: name)
+            guard let buffer = data.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }) else { throw TrainerError.noDevice }
+            frozen[input] = MPSGraphTensorData(buffer, shape: shape(s), dataType: .float32)
+            return input
+        }
         func parameter(_ name: String, trainable: Bool) throws -> MPSGraphTensor {
             let (data, s) = try floats(name)
             if trainable {
@@ -54,7 +63,7 @@ public final class GraphTrainer {
                 variables.append((name, v, s))
                 return graph.read(v, name: nil)
             }
-            return graph.constant(data, shape: shape(s), dataType: .float32)
+            return try fed(data, s, name)
         }
         func matrix(_ name: String, trainable: Bool) throws -> MPSGraphTensor {
             graph.transposeTensor(try parameter(name, trainable: trainable), dimension: 0, withDimension: 1, name: nil)
@@ -93,7 +102,7 @@ public final class GraphTrainer {
         let tokenTable = try parameter("tokens.weight", trainable: false)
         var x = graph.gather(withUpdatesTensor: tokenTable, indicesTensor: ids, axis: 0, batchDimensions: 0, name: nil)
         let (positionData, _) = try floats("positions.weight")
-        x = graph.addition(x, graph.constant(positionData.subdata(in: 0 ..< rows * d * 4), shape: shape([rows, d]), dataType: .float32), name: nil)
+        x = graph.addition(x, try fed(positionData.subdata(in: 0 ..< rows * d * 4), [rows, d], "positions.weight"), name: nil)
         for layer in 0..<layers {
             let trainable = layer >= layers - top
             let p = "blocks.\(layer)"
@@ -138,7 +147,7 @@ public final class GraphTrainer {
             updates.append(graph.assign(velocity, tensor: result[2], name: nil))
         }
         self.ids = ids; self.targets = targets; self.learningRate = learningRate; self.beta1Power = beta1Power; self.beta2Power = beta2Power
-        self.loss = loss; self.updates = updates; self.variables = variables
+        self.loss = loss; self.updates = updates; self.variables = variables; self.frozen = frozen
         trainableNames = variables.map(\.name)
     }
 
@@ -166,18 +175,20 @@ public final class GraphTrainer {
             }
         }
         stepCount += 1
-        let feeds: [MPSGraphTensor: MPSGraphTensorData] = [
+        var feeds: [MPSGraphTensor: MPSGraphTensorData] = [
             ids: data(idsBatch, [batch, rows]), targets: data(targetBatch, [batch, rows]),
             learningRate: data([lr], [1]), beta1Power: data([pow(0.9, Float(stepCount))], [1]), beta2Power: data([pow(0.999, Float(stepCount))], [1]),
         ]
+        feeds.merge(frozen) { a, _ in a }
         if stepExecutable == nil {
-            let types: [MPSGraphTensor: MPSGraphShapedType] = [
+            var types: [MPSGraphTensor: MPSGraphShapedType] = [
                 ids: MPSGraphShapedType(shape: [NSNumber(value: batch), NSNumber(value: rows)], dataType: .int32),
                 targets: MPSGraphShapedType(shape: [NSNumber(value: batch), NSNumber(value: rows)], dataType: .int32),
                 learningRate: MPSGraphShapedType(shape: [1], dataType: .float32),
                 beta1Power: MPSGraphShapedType(shape: [1], dataType: .float32),
                 beta2Power: MPSGraphShapedType(shape: [1], dataType: .float32),
             ]
+            for (tensor, value) in frozen { types[tensor] = MPSGraphShapedType(shape: value.shape, dataType: value.dataType) }
             stepExecutable = graph.compile(with: graphDevice, feeds: types, targetTensors: [loss], targetOperations: updates, compilationDescriptor: GraphLock.gpuOnly)
         }
         guard let executable = stepExecutable, let order = executable.feedTensors else { return .nan }

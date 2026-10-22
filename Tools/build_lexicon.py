@@ -33,7 +33,7 @@ READINGS = os.path.join(ROOT, "Data", "lexicon", "readings.tsv")  # character â†
 ENGLISH = os.path.join(LEXICONS, "english", "en_50k.txt")
 CASING = os.path.join(ROOT, "Data", "lexicon", "english_casing.tsv")  # Tools/make_english_casing.py
 OUT = os.path.join(ROOT, "Data", "lexicon", "lexicon.sqlite")
-VOCAB = os.path.join(ROOT, "Data", "lm9", "vocab.json")  # the language model's characters
+VOCAB = os.path.join(ROOT, "Data", "prepared-clean", "vocab.json")  # the language model's characters
 
 # The Unicode blocks of Chinese characters (GB 18030 maps all of them): the basic block, extensions
 # A to H and the compatibility ideographs.

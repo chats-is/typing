@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Count how often the lexicon's words occur in everyday text, to rank homophones the way people type.
 
-    Data/venv-train/bin/python Training/count_words.py --data Data/lm9 --out Data/lexicon/word_counts.tsv
+    Data/venv-train/bin/python Training/count_words.py --data Data/prepared-clean --out Data/lexicon/word_counts.tsv
 
 Every word of Data/lexicons/all_words.tsv (listed by at least --sources lexicons, or a single
 character) is counted as a substring of each corpus stream (token ids from prepare_data.py), per
@@ -113,7 +113,7 @@ def segmented(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "lm9"))
+    parser.add_argument("--data", default=os.path.join(ROOT, "Data", "prepared-clean"))
     parser.add_argument("--table", default=os.path.join(ROOT, "Data", "lexicons", "all_words.tsv"))
     parser.add_argument("--out", default=os.path.join(ROOT, "Data", "lexicon", "word_counts.tsv"))
     parser.add_argument("--sources", type=int, default=2, help="a word is counted if this many lexicons list it")

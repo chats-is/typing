@@ -9,9 +9,10 @@ for evaluation). It also writes <out>/vocab.json (a JSON list, index = token id)
 (the held-out documents of all sources, tokenised) and <out>/sources.json (name -> sampling weight).
 
 Tokens are single characters: Chinese by character, everything else lowercased character by
-character. Documents written mostly in traditional characters are dropped. Training documents
-are cleaned (Training/cleaning.py: nothing identifying, nothing one does not type); the held-out
-ones are kept as they are, and which documents are held out does not change.
+character. Documents written mostly in traditional characters are dropped. Every document is cleaned
+(Training/cleaning.py: nothing identifying, nothing one does not type), the held-out ones too, so
+that validation and the test sets made from them measure the text the model is trained for; which
+documents are held out does not change.
 
 --cased-from Data/lm9 keeps the case of English letters instead ("iPhone", "CEO"): it reuses that
 directory's vocabulary, so a model trained on it can be trained further, and adds the 26
@@ -20,6 +21,10 @@ The documents and the held-out split are the same as without it.
 
 --add web,techdocs only writes those sources (and appends their held-out documents to val.bin),
 keeping everything else in --out; the vocabulary in --out is reused.
+
+--clean-holdouts cleans the holdout_<source>.txt files already in --out (written by an earlier
+version that kept them as they were) and writes val.bin again from them, with the vocabulary in
+--out; the training files are left alone.
 """
 import argparse
 import json
@@ -103,6 +108,52 @@ def build_vocab(names, known):
     return SPECIAL + [chr(c) for c in forced + typable + frequent]
 
 
+def token_table(vocab):
+    """Code point -> token id for a vocabulary."""
+    table = np.full(0x110000, UNK, dtype=np.uint16)
+    for token_id, token in enumerate(vocab[len(SPECIAL):], len(SPECIAL)):
+        table[ord(token)] = token_id
+    if KEEP_CASE:
+        # Only English letters keep their case; every other capital reads as its small letter.
+        for point in range(0x80, 0x110000):
+            if 0xD800 <= point <= 0xDFFF:
+                continue
+            small = chr(point).lower()
+            if len(small) == 1 and small != chr(point):
+                table[point] = table[ord(small)]
+    return table
+
+
+def encoder(table):
+    newline = table[ord("\n")]
+    return lambda points: np.concatenate(([BOS], table[points], [newline])).astype("<u2")
+
+
+def clean_holdouts(out):
+    """Cleans the held-out documents an earlier version kept as they were, and val.bin with them."""
+    global KEEP_CASE
+    with open(os.path.join(out, "vocab.json"), encoding="utf-8") as f:
+        vocab = json.load(f)
+    KEEP_CASE = "A" in vocab
+    encode = encoder(token_table(vocab))
+    names = [name for name in SOURCES if os.path.exists(os.path.join(out, f"holdout_{name}.txt"))]
+    with open(os.path.join(out, "val.bin"), "wb") as val:
+        for name in names:
+            path = os.path.join(out, f"holdout_{name}.txt")
+            with open(path, encoding="utf-8") as f:
+                documents = [doc for doc in f.read().split("\n\n") if doc.strip()]
+            kept, changed = [], 0
+            for doc in documents:
+                cleaned = clean(doc)
+                changed += cleaned != doc
+                if cleaned is not None and len(cleaned) >= 5:
+                    kept.append(cleaned)
+                    val.write(encode(codepoints(cleaned)).tobytes())
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(doc + "\n\n" for doc in kept))
+            print(f"holdout_{name}.txt: {len(kept)} of {len(documents)} documents kept, {changed} changed by cleaning", flush=True)
+
+
 def lexicon_words():
     """Every word of the merged lexicons (Tools/merge_lexicons.py) and a sampling distribution
     that is half by frequency and half uniform, so common words recur and rare names still appear."""
@@ -126,10 +177,14 @@ def main():
     parser.add_argument("--only-words", action="store_true", help="only rewrite words.bin with the existing vocabulary")
     parser.add_argument("--cased-from", default=None, help="keep English capitals, extending this directory's vocabulary")
     parser.add_argument("--add", default=None, help="comma-separated sources to write into an existing --out")
+    parser.add_argument("--clean-holdouts", action="store_true", help="clean the held-out files in --out and rewrite val.bin")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
     global KEEP_CASE
     KEEP_CASE = args.cased_from is not None
+    if args.clean_holdouts:
+        clean_holdouts(args.out)
+        return
 
     known = simplified_characters()
     names = [name for name, (reader, _) in SOURCES.items() if reader is not None]
@@ -150,21 +205,8 @@ def main():
             json.dump(vocab, f, ensure_ascii=False)
         print(f"vocab: {len(vocab)} tokens", flush=True)
 
-    table = np.full(0x110000, UNK, dtype=np.uint16)
-    for token_id, token in enumerate(vocab[len(SPECIAL):], len(SPECIAL)):
-        table[ord(token)] = token_id
-    if KEEP_CASE:
-        # Only English letters keep their case; every other capital reads as its small letter.
-        for point in range(0x80, 0x110000):
-            if 0xD800 <= point <= 0xDFFF:
-                continue
-            small = chr(point).lower()
-            if len(small) == 1 and small != chr(point):
-                table[point] = table[ord(small)]
-    newline = table[ord("\n")]
-
-    def encode(points):
-        return np.concatenate(([BOS], table[points], [newline])).astype("<u2")
+    table = token_table(vocab)
+    encode = encoder(table)
 
     with open(os.path.join(args.out, "val.bin"), "ab" if args.only_words or args.add else "wb") as val:
         for name in names:
@@ -175,8 +217,10 @@ def main():
                 for index, points in enumerate(documents(name, known), 1):
                     if index % HOLDOUT_EVERY == 0 and held < MAX_HOLDOUT_DOCS:
                         held += 1
-                        val.write(encode(points).tobytes())
-                        holdout.write(points.astype("<u4").tobytes().decode("utf-32-le") + "\n\n")
+                        cleaned = clean(points.astype("<u4").tobytes().decode("utf-32-le"))
+                        if cleaned is not None and len(cleaned) >= 5:
+                            val.write(encode(codepoints(cleaned)).tobytes())
+                            holdout.write(cleaned + "\n\n")
                         continue
                     text = points.astype("<u4").tobytes().decode("utf-32-le")
                     cleaned = clean(text)

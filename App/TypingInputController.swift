@@ -73,6 +73,7 @@ class TypingInputController: IMKInputController {
             finishEnglishToken()
             commitRaw(client)
             Self.panel.hide()
+            ModeIndicator.shared.hide()
             return false
         case .flagsChanged:
             handleFlagsChanged(event, client: client)
@@ -81,6 +82,7 @@ class TypingInputController: IMKInputController {
             // (keyCode is only defined for key events.)
             if event.keyCode == Key.delete, !session.isComposing { Learning.noteDelete() }
             modifierPressedAlone = nil
+            ModeIndicator.shared.hide()  // typing goes on: the candidates take its place
             let wasDigit = lastKeyWasDigit
             lastKeyWasDigit = false
             return handleKeyDown(event, client: client, afterDigit: wasDigit)
@@ -165,6 +167,7 @@ class TypingInputController: IMKInputController {
             commitRaw(client)
             // Caps Lock means its state (lock on = English); any other key toggles.
             Self.asciiMode = lockState ?? !Self.asciiMode
+            ModeIndicator.shared.show(chinese: !Self.asciiMode, near: caretRect(client))
             return true
         case .openSettings:
             commitRaw(client)
@@ -516,8 +519,11 @@ class TypingInputController: IMKInputController {
         return rect.origin == .zero ? Self.panel.anchor : rect
     }
 
-    /// Closes the shared candidate panel (another application came to the front).
-    static func hidePanel() { panel.hide() }
+    /// Closes the shared candidate panel and the language mark (another application came to the front).
+    static func hidePanel() {
+        panel.hide()
+        ModeIndicator.shared.hide()
+    }
 
     // MARK: - Display
 

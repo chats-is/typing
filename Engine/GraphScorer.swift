@@ -19,6 +19,8 @@ public final class GraphScorer: SentenceScorer {
     private let queue: MTLCommandQueue
     private let graphDevice: MPSGraphDevice
     private let targetExecutable: MPSGraphExecutable
+    /// The weights fed to the executable, in its feed order (nil where the ids go).
+    private let weightInputs: [MPSGraphTensorData?]
     private var lock: NSRecursiveLock { GraphLock.shared }
 
     struct TensorInfo: Decodable { let name: String; let shape: [Int]; let offset: Int; let count: Int }
@@ -129,6 +131,11 @@ public final class GraphScorer: SentenceScorer {
         let headDim = d / heads
         let graph = MPSGraph()
         func shape(_ s: [Int]) -> [NSNumber] { s.map { NSNumber(value: $0) } }
+        // The weights are fed from GPU buffers, not built in as constants: MPSGraph writes the data
+        // of every constant out to disk as it builds, compiles and first runs a graph (about 60 MB
+        // three times for this model), which made the input method exceed the system's disk-write
+        // limit. The numbers are the same either way.
+        var weightFeeds: [MPSGraphTensor: MPSGraphTensorData] = [:]
         func constant(_ name: String, rowsLimit: Int? = nil) throws -> MPSGraphTensor {
             guard let tensor = weights.tensors[name] else { throw GraphError.missingTensor(name) }
             var s = tensor.shape
@@ -137,7 +144,10 @@ public final class GraphScorer: SentenceScorer {
                 data = data.subdata(in: 0 ..< rowsLimit * s[1] * 2)
                 s[0] = rowsLimit
             }
-            return graph.constant(data, shape: shape(s), dataType: .float16)
+            let input = graph.placeholder(shape: shape(s), dataType: .float16, name: name)
+            guard let buffer = data.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }) else { throw GraphError.noDevice }
+            weightFeeds[input] = MPSGraphTensorData(buffer, shape: shape(s), dataType: .float16)
+            return input
         }
         func matrix(_ name: String) throws -> MPSGraphTensor {
             graph.transposeTensor(try constant(name), dimension: 0, withDimension: 1, name: nil)
@@ -196,7 +206,10 @@ public final class GraphScorer: SentenceScorer {
         GraphLock.shared.lock()
         defer { GraphLock.shared.unlock() }
         let idsType = MPSGraphShapedType(shape: shape([batchSize, rowLength]), dataType: .int32)
-        targetExecutable = graph.compile(with: graphDevice, feeds: [idsInput: idsType], targetTensors: [targetOut], targetOperations: nil, compilationDescriptor: GraphLock.gpuOnly)
+        var feedTypes = weightFeeds.mapValues { MPSGraphShapedType(shape: $0.shape, dataType: $0.dataType) }
+        feedTypes[idsInput] = idsType
+        targetExecutable = graph.compile(with: graphDevice, feeds: feedTypes, targetTensors: [targetOut], targetOperations: nil, compilationDescriptor: GraphLock.gpuOnly)
+        weightInputs = (targetExecutable.feedTensors ?? [idsInput]).map { weightFeeds[$0] }
         // First runs build the GPU pipelines (hundreds of ms): do it now, not on the first keystroke.
         _ = targetLogp(rows: [[1, 2]])
     }
@@ -251,7 +264,8 @@ public final class GraphScorer: SentenceScorer {
         var flat = [Int32](repeating: 0, count: batchSize * rowLength)
         for (r, row) in rows.enumerated() { for (t, v) in row.enumerated() { flat[r * rowLength + t] = v } }
         lock.lock(); defer { lock.unlock() }
-        let results = targetExecutable.run(with: queue, inputs: [tensorData(flat, [batchSize, rowLength])], results: nil, executionDescriptor: nil)
+        let idsData = tensorData(flat, [batchSize, rowLength])
+        let results = targetExecutable.run(with: queue, inputs: weightInputs.map { $0 ?? idsData }, results: nil, executionDescriptor: nil)
         var values = [Float](repeating: 0, count: batchSize * (rowLength - 1))
         results[0].mpsndarray().readBytes(&values, strideBytes: nil)
         return rows.indices.map { r in Array(values[r * (rowLength - 1) ..< (r + 1) * (rowLength - 1)]) }

@@ -3,7 +3,7 @@
 export (Training/export_weights.py). The input method reads every other tensor out of the Core ML
 model, whose position table is cut to its 32 rows; learning trains on 64-row windows.
 
-    python3 Tools/extract_positions.py Data/lm9/weights Resources/positions.bin
+    python3 Tools/extract_positions.py Data/clean2/weights Resources/positions.bin
 """
 import json
 import sys

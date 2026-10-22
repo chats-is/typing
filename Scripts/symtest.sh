@@ -14,5 +14,5 @@ mkdir -p build/tools "$OUT.home"
 if [ -f "$BIN/Engine.o" ]; then OBJECTS=("$BIN/Engine.o"); else OBJECTS=("$BIN"/Engine.build/*.o); fi
 swiftc -O -swift-version 5 -I "$BIN" -I "$BIN/Modules" -F "$BIN/PackageFrameworks" -framework Cocoa -framework InputMethodKit -framework SwiftUI \
     -framework CoreML -framework Metal -framework MetalPerformanceShadersGraph -lsqlite3 "${OBJECTS[@]}" \
-    App/TypingInputController.swift App/CandidatePanel.swift App/Learning.swift App/SettingsWindow.swift App/Shortcuts.swift Tools/symtest/main.swift -o "$OUT"
+    App/TypingInputController.swift App/CandidatePanel.swift App/ModeIndicator.swift App/Learning.swift App/SettingsWindow.swift App/Shortcuts.swift Tools/symtest/main.swift -o "$OUT"
 HOME="$PWD/$OUT.home" CFFIXED_USER_HOME="$PWD/$OUT.home" "$OUT"

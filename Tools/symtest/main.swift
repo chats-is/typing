@@ -157,9 +157,16 @@ func keyMods(_ chars: String, code: UInt16, _ modifiers: NSEvent.ModifierFlags) 
                                  characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code)!
     if !controller.handle(event, client: client) { client.appHandles(event) }
 }
-flags(56, [.shift]); flags(56, []); key("a", code: 0)
+flags(56, [.shift]); flags(56, [])
+let markEnglish = ModeIndicator.shared.isVisible && !ModeIndicator.shared.showsChinese
+key("a", code: 0)
+let markGoes = !ModeIndicator.shared.isVisible
+print((markEnglish && markGoes ? "ok   " : "FAIL ") + "Shift alone → the mark shows English (hollow dots), and goes on the next key"); if !(markEnglish && markGoes) { failures += 1 }
 print((client.marked == nil && client.text as String == "a" ? "ok   " : "FAIL ") + "Shift alone → English (default)"); if !(client.marked == nil && client.text as String == "a") { failures += 1 }
 flags(56, [.shift]); flags(56, []); client.text = NSMutableString(); client.cursor = 0
+let markChinese = ModeIndicator.shared.isVisible && ModeIndicator.shared.showsChinese
+print((markChinese ? "ok   " : "FAIL ") + "Shift alone again → the mark shows Chinese (filled dots)"); if !markChinese { failures += 1 }
+ModeIndicator.shared.hide()
 for binding in ShortcutStore.shared.bindings[.toggleLanguage] ?? [] where binding.keyCode != 57 { ShortcutStore.shared.remove(binding, from: .toggleLanguage) }
 flags(56, [.shift]); flags(56, []); key("a", code: 0)
 print((client.marked != nil ? "ok   " : "FAIL ") + "Shift alone with its binding removed → still Chinese"); if client.marked == nil { failures += 1 }
@@ -438,6 +445,13 @@ Learning.store.record(keys: "zaijian", text: "再见", context: "", undoWindow: 
 Learning.store.flush()
 let redactedContext = Learning.store.entries().first { $0.text == "好的" }?.context
 print((redactedContext == "电话＊，邮箱＊，" ? "ok   " : "FAIL ") + "learning record: number and e-mail taken out of the context (\(redactedContext ?? "-"))"); if redactedContext != "电话＊，邮箱＊，" { failures += 1 }
+// The same rules as the training text (Training/test_cleaning.py has the full list).
+for (text, expected) in [("网址http://a.cn/x好", "网址＊好"), ("回复 @联合光子a 你说得对", "回复 @＊ 你说得对"), ("微信号：caffe007", "微信号：＊"),
+                         ("南门11楼1211 提前电联", "南门＊ 提前电联"), ("灰色豫AG0T02宝马", "灰色＊宝马"), ("姓名学没什么道理", "姓名学没什么道理"),
+                         ("我们2016-07-20 11:30见", "我们2016-07-20 11:30见")] {
+    let got = Redaction.redact(text)
+    print((got == expected ? "ok   " : "FAIL ") + "redaction: \(text) → \(got)"); if got != expected { failures += 1 }
+}
 let afterPrompt = Learning.store.entries().contains { $0.text == "一起" }
 print((!afterPrompt ? "ok   " : "FAIL ") + "learning record: nothing kept after a prompt for a code"); if afterPrompt { failures += 1 }
 let offered = Learning.store.typedEnglish("dont") == ["don't"]

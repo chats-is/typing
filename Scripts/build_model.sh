@@ -1,6 +1,6 @@
 #!/bin/bash
 # Turns a trained checkpoint into the Core ML model the input method bundles.
-# Usage: Scripts/build_model.sh Data/lm9/model.pt [output directory, default Resources]
+# Usage: Scripts/build_model.sh Data/clean2/model.pt [output directory, default Resources]
 # The vocabulary is taken from vocab.json next to the checkpoint.
 set -euo pipefail
 cd "$(dirname "$0")/.."
