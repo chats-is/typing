@@ -1,0 +1,9 @@
+{
+ "config": {
+  "vocab_size": 9026,
+  "block_size": 64,
+  "n_layer": 8,
+  "n_head": 8,
+  "d_model": 512
+ }
+}

@@ -1,0 +1,199 @@
+import Foundation
+
+/// Pairs of sounds that can be set to count as the same.
+public enum FuzzyRule: String, CaseIterable {
+    case zZh = "z-zh", cCh = "c-ch", sSh = "s-sh", nL = "n-l", lR = "l-r", fH = "f-h"
+    case anAng = "an-ang", ianIang = "ian-iang", uanUang = "uan-uang", enEng = "en-eng", inIng = "in-ing"
+    case uV = "u-v"
+
+    /// How the rule reads in the settings window.
+    public var label: String {
+        switch self {
+        case .zZh: return "z = zh"
+        case .cCh: return "c = ch"
+        case .sSh: return "s = sh"
+        case .nL: return "n = l"
+        case .lR: return "l = r"
+        case .fH: return "f = h"
+        case .anAng: return "an = ang"
+        case .ianIang: return "ian = iang"
+        case .uanUang: return "uan = uang"
+        case .enEng: return "en = eng"
+        case .inIng: return "in = ing"
+        case .uV: return "u = ü"
+        }
+    }
+}
+
+/// Maps a run of typed letters to the syllables it can stand for: itself, a fuzzy-sound
+/// equivalent, or (in tolerant mode) a syllable one keystroke slip away.
+struct SyllableMatcher {
+    struct Match {
+        let syllable: String
+        /// Log-probability cost of reading the typed letters this way.
+        let penalty: Double
+    }
+
+    /// Longest run of letters that can stand for one syllable (a 6-letter syllable plus one stray key).
+    static let maxTypedLength = 7
+
+    private let syllables: Set<String>
+    /// Other spellings of a syllable, always read as it: lue and nue for lüe and nüe (略, 虐),
+    /// as most text writes them.
+    private var spellings: [String: [Match]] = [:]
+    private var fuzzy: [String: [Match]] = [:]
+    private var typos: [String: [Match]] = [:]
+
+    private static let fuzzyPenalty = 1.0
+    /// Every typing-slip penalty is at least this, every fuzzy-sound penalty is below it.
+    static let minimumTypoPenalty = 2.5
+    private static let transpositionPenalty = 2.5
+    private static let doubledLetterPenalty = 2.5
+    private static let substitutionPenalty = 3.0
+    private static let missingLetterPenalty = 3.5
+    private static let strayLetterPenalty = 3.5
+    /// Extra cost when the mistyped letters spell a valid syllable themselves.
+    private static let realSyllablePenalty = 1.0
+
+    private static let keyboardRows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+    /// Keys next to each key on a QWERTY keyboard.
+    private static let neighbors: [Character: [Character]] = {
+        let rows = keyboardRows.map(Array.init)
+        // Each row sits about half a key to the right of the row above.
+        var result: [Character: [Character]] = [:]
+        for (r, row) in rows.enumerated() {
+            for (c, key) in row.enumerated() {
+                var near: [Character] = []
+                if c > 0 { near.append(row[c - 1]) }
+                if c + 1 < row.count { near.append(row[c + 1]) }
+                if r > 0 {
+                    for above in [c, c + 1] where above < rows[r - 1].count { near.append(rows[r - 1][above]) }
+                }
+                if r + 1 < rows.count {
+                    for below in [c - 1, c] where below >= 0 && below < rows[r + 1].count { near.append(rows[r + 1][below]) }
+                }
+                result[key] = near
+            }
+        }
+        return result
+    }()
+
+    init(syllables: Set<String>, fuzzyRules: Set<FuzzyRule>) {
+        self.syllables = syllables
+        for syllable in ["lve", "nve"] where syllables.contains(syllable) {
+            spellings[syllable.replacingOccurrences(of: "v", with: "u"), default: []].append(Match(syllable: syllable, penalty: 0))
+        }
+        for syllable in syllables {
+            for variant in Self.fuzzyVariants(of: syllable, rules: fuzzyRules, syllables: syllables) where variant != syllable
+                && !(spellings[variant]?.contains { $0.syllable == syllable } ?? false) {
+                fuzzy[variant, default: []].append(Match(syllable: syllable, penalty: Self.fuzzyPenalty))
+            }
+            for (variant, slipPenalty) in Self.typoVariants(of: syllable) where variant != syllable {
+                // A slip that happens to spell another syllable ("nu" for "bu", "an" for "kan") is
+                // only caught from context, so it has to explain the text clearly better.
+                // Single letters are left alone: "a", "e" and "o" are one slip from too many syllables.
+                guard variant.count >= 2 else { continue }
+                let isSyllable = syllables.contains(variant)
+                let penalty = slipPenalty + (isSyllable ? Self.realSyllablePenalty : 0)
+                var matches = typos[variant, default: []]
+                if let index = matches.firstIndex(where: { $0.syllable == syllable }) {
+                    if matches[index].penalty > penalty { matches[index] = Match(syllable: syllable, penalty: penalty) }
+                } else {
+                    matches.append(Match(syllable: syllable, penalty: penalty))
+                }
+                typos[variant] = matches
+            }
+        }
+    }
+
+    /// Syllables that `typed` can stand for. Slips of the finger are only considered when `tolerant`.
+    func matches(_ typed: String, tolerant: Bool) -> [Match] {
+        var result: [Match] = []
+        if syllables.contains(typed) { result.append(Match(syllable: typed, penalty: 0)) }
+        if let other = spellings[typed] { result += other }
+        if let alternatives = fuzzy[typed] { result += alternatives }
+        if tolerant, let corrections = typos[typed] { result += corrections }
+        return result
+    }
+
+    private static func fuzzyVariants(of syllable: String, rules: Set<FuzzyRule>, syllables: Set<String>) -> Set<String> {
+        var initials: [(String, String)] = []
+        if rules.contains(.zZh) { initials.append(("z", "zh")) }
+        if rules.contains(.cCh) { initials.append(("c", "ch")) }
+        if rules.contains(.sSh) { initials.append(("s", "sh")) }
+        // Finals that sound alike; an/ang only after an initial (lan, zhang), not inside ian or uan,
+        // which are rules of their own.
+        var finals: [(front: String, back: String, notAfter: Set<Character>)] = []
+        if rules.contains(.anAng) { finals.append(("an", "ang", ["i", "u"])) }
+        if rules.contains(.ianIang) { finals.append(("ian", "iang", [])) }
+        if rules.contains(.uanUang) { finals.append(("uan", "uang", [])) }
+        if rules.contains(.enEng) { finals.append(("en", "eng", [])) }
+        if rules.contains(.inIng) { finals.append(("in", "ing", [])) }
+        // ü written u after n and l: nu for nv (女), lu for lv (绿), and the other way.
+        var heads: Set<String> = [syllable]
+        if rules.contains(.uV), syllable.hasPrefix("n") || syllable.hasPrefix("l") {
+            let other = syllable.contains("v") ? syllable.replacingOccurrences(of: "v", with: "u") : syllable.replacingOccurrences(of: "u", with: "v")
+            if syllable.contains("v") || syllables.contains(other) { heads.insert(other) }
+        }
+
+        for (plain, retroflex) in initials {
+            if syllable.hasPrefix(retroflex) {
+                heads.insert(plain + syllable.dropFirst(retroflex.count))
+            } else if syllable.hasPrefix(plain) {
+                heads.insert(retroflex + syllable.dropFirst(plain.count))
+            }
+        }
+        // Single-letter initials that sound alike (n/l, l/r, f/h).
+        for (rule, one, other) in [(FuzzyRule.nL, "n", "l"), (.lR, "l", "r"), (.fH, "f", "h")] where rules.contains(rule) {
+            if syllable.hasPrefix(one) { heads.insert(other + syllable.dropFirst()) }
+            if syllable.hasPrefix(other) { heads.insert(one + syllable.dropFirst()) }
+        }
+        var result = heads
+        for head in heads {
+            for (front, back, notAfter) in finals {
+                if head.hasSuffix(back), !(head.dropLast(back.count).last.map(notAfter.contains) ?? false) {
+                    result.insert(String(head.dropLast()))
+                } else if head.hasSuffix(front), !head.hasSuffix(back), !(head.dropLast(front.count).last.map(notAfter.contains) ?? false) {
+                    result.insert(head + "g")
+                }
+            }
+        }
+        return result
+    }
+
+    /// Everything one slip away from `syllable`: swapped neighbours, a doubled, missing or
+    /// stray letter, or a hit on an adjacent key.
+    private static func typoVariants(of syllable: String) -> [(String, Double)] {
+        let letters = Array(syllable)
+        var result: [(String, Double)] = []
+        for i in letters.indices {
+            var missing = letters
+            missing.remove(at: i)
+            result.append((String(missing), missingLetterPenalty))
+
+            if i + 1 < letters.count, letters[i] != letters[i + 1] {
+                var swapped = letters
+                swapped.swapAt(i, i + 1)
+                result.append((String(swapped), transpositionPenalty))
+            }
+
+            var doubled = letters
+            doubled.insert(letters[i], at: i)
+            result.append((String(doubled), doubledLetterPenalty))
+
+            for near in neighbors[letters[i]] ?? [] {
+                var substituted = letters
+                substituted[i] = near
+                result.append((String(substituted), substitutionPenalty))
+
+                // A neighbouring key caught together with the intended one, before or after it.
+                for offset in [i, i + 1] {
+                    var stray = letters
+                    stray.insert(near, at: offset)
+                    result.append((String(stray), strayLetterPenalty))
+                }
+            }
+        }
+        return result
+    }
+}

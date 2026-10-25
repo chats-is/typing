@@ -1,0 +1,20 @@
+# What Scripts/gate.sh checks the first-choice rates against: the accepted model's numbers, the same
+# as docs/benchmarks.md (clean3 with the lexicon counted from the cleaned data). When a new model is accepted, both are updated together.
+# A set may come out one sentence lower (the same command can differ by one near tie between runs).
+# set	exact %
+eval_word_full.tsv	96.13
+eval_word_mixed.tsv	84.00
+eval_word_initials.tsv	59.37
+eval_word_english.tsv	37.83
+eval_dialogue.tsv	85.00
+eval_news.tsv	87.67
+eval_forum.tsv	76.67
+eval_touchpal.tsv	77.67
+eval_short.tsv	90.00
+fresh/eval_dialogue.tsv	75.00
+fresh/eval_forum.tsv	71.00
+fresh/eval_mixed.tsv	78.00
+fresh/eval_news.tsv	77.67
+fresh/eval_novels.tsv	54.95
+fresh/eval_touchpal.tsv	70.33
+fresh/eval_web.tsv	71.67

@@ -1,0 +1,4 @@
+/* Names shown in the input menu and in Keyboard settings. */
+CFBundleName = "智能输入";
+CFBundleDisplayName = "智能输入";
+"is.chats.inputmethod.Typing" = "智能输入";

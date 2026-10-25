@@ -1,0 +1,46 @@
+# Build products
+.build/
+.build-*/
+build/
+# Local install packages (Scripts/release/make_pkg.sh <version> dist); public ones come from the Release workflow.
+dist/
+*.dSYM/
+.DS_Store
+
+# Corpora, checkpoints, training environments and generated lexicon tables (tens of GB; see docs/development.md)
+Data/*
+# Where every raw input comes from (Tools/fetch_data.py downloads and checks them).
+!Data/manifest.tsv
+# The character readings table every lexicon and eval tool reads.
+!Data/lexicon/
+Data/lexicon/*
+!Data/lexicon/readings.tsv
+# Every eval set: the word tests and sentence sets the gate runs, the input pattern sets, the system
+# Pinyin's answers (eval_sys_*), and the sets Tools/make_fresh_eval.py keeps the fresh sets apart from.
+!Data/eval*.tsv
+# The sentence sets that decide between models (Tools/make_fresh_eval.py): cleaned held-out text,
+# nothing that occurs in training, never used to tune anything.
+!Data/fresh/
+Data/fresh/*
+!Data/fresh/eval_*.tsv
+!Data/fresh/general_dialogue.tsv
+!Data/personal/
+Data/personal/*
+!Data/personal/forum2.train.txt
+!Data/personal/forum2.eval.tsv
+!Data/personal/forum2.lattice.tsv
+
+# (The lexicon, bigram model, Core ML model and fp16 weights are tracked with Git LFS, see .gitattributes.)
+Resources/KeyModel.mlmodelc/
+
+# Generated icons
+Resources/AppIcon.icns
+Resources/AppIcon.iconset/
+Resources/icon.pdf
+Resources/menu.pdf
+Resources/palette.png
+Resources/palette@2x.png
+
+# Python
+__pycache__/
+*.pyc

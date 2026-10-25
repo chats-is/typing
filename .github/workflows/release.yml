@@ -1,0 +1,76 @@
+name: Release
+
+# A tag v<major>.<minor>[.<patch>] builds the input method, packs it with the installer and the
+# resources archive, and publishes a GitHub release. The app is signed ad hoc (no Developer ID),
+# so the installer removes the quarantine attribute; see docs/release.md.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: LFS file list
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-ids
+      - uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-ids') }}
+      - name: Fetch LFS files
+        run: git lfs pull
+
+      # The release is the version that was tested: Info.plist as committed (CFBundleShortVersionString
+      # and CFBundleVersion), never rewritten here. The tag must name the same version.
+      - name: Version from Info.plist
+        run: |
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Bundle/Info.plist)"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Bundle/Info.plist)"
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Info.plist version $VERSION" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "release $VERSION, build $BUILD"
+
+      - name: Build and gate
+        run: set -o pipefail; Scripts/gate.sh | tee gate.log
+
+      - name: Package
+        run: |
+          Scripts/build.sh
+          mkdir -p dist
+          Scripts/release/make_pkg.sh "$VERSION" dist
+          Scripts/release/make_dmg.sh "$VERSION" dist
+          Scripts/package_resources.sh dist
+
+      - name: Release notes
+        run: |
+          {
+            echo "## 智能输入 $VERSION"
+            echo
+            echo "安装包 \`Typing-$VERSION.pkg\`：双击安装到 /Library/Input Methods 并启用（首次可能需要注销再登录）。"
+            echo "磁盘映像 \`Typing-$VERSION.dmg\`：打开后把 Typing.app 拖进 Input Methods，再到 系统设置 › 键盘 › 输入法 添加。"
+            echo "两者都是本机临时签名，首次打开需要在 系统设置 › 隐私与安全性 里允许。"
+            echo
+            echo "### 门槛"
+            echo '```'
+            sed -n '/== word tests/,$p' gate.log 2>/dev/null || true
+            echo '```'
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: |
+            dist/Typing-*.pkg
+            dist/Typing-*.pkg.sha256
+            dist/Typing-*.dmg
+            dist/Typing-*.dmg.sha256
+            dist/typing-resources-*.tar.zst
+            dist/typing-resources-*.sha256

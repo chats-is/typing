@@ -1,0 +1,108 @@
+{
+ "about": "What is replaced by ＊ in the training text (Training/cleaning.py, redact()) and in the input method's learning records (Engine/Redaction.swift): one list for both. Patterns are written to mean the same in Python's re and in ICU (NSRegularExpression). {{NAME}} is replaced by vars[NAME] before compiling; in replace, $1 is the first group. A rule with \"generated\": true replaces a match only when it looks generated (see its why). Running the rules twice must give what running them once gives (the learning store redacts its records anew at every start; Training/test_cleaning.py checks it). Rules apply in order: e-mail before \"@someone\", accounts before plain digits. Training/test_cleaning.py and Tools/symtest check them.",
+ "mark": "＊",
+ "vars": {
+  "URL_END": "[^\\s，。、；：！？）》」』\\\"'<>（(【\\[一-鿿,]*",
+  "TLD": "(?:monster|online|click|cloud|store|asia|blog|bond|buzz|club|cyou|guru|info|link|live|loan|mobi|name|shop|site|tech|wang|work|app|bid|biz|cfd|com|dev|edu|fun|gov|icu|ink|kim|ltd|net|org|pro|ren|sbs|top|vip|win|xin|xyz|ac|ad|ae|af|ag|al|ao|aq|ar|au|aw|ax|az|ba|bb|bd|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bw|bz|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cw|cx|cy|cz|de|dj|dk|dm|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|ie|il|im|io|iq|ir|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|me|mg|mh|mm|mn|mp|mq|mr|ms|mt|mu|mv|mw|mx|mz|na|nc|ne|nf|ng|ni|nl|np|nr|nu|nz|om|pa|pe|pf|pg|pk|pn|pr|pt|pw|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|si|sk|sl|sm|sn|so|sr|ss|st|su|sv|sx|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|tr|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|za|zm|zw)",
+  "TLD_PATH": "(?:company|network|science|center|design|review|travel|email|games|group|media|party|press|space|today|tools|trade|world|best|chat|city|cool|date|game|host|life|love|news|page|plus|rest|show|team|wiki|zone|art|bar|fit|int|men|mil|one|pub|red|run|tel|ai|am|as|at|be|by|ca|cs|do|go|id|in|is|it|lb|md|mk|ml|mo|my|no|ph|pl|pm|ps|py|rs|sh|to)",
+  "PROVINCE": "京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼",
+  "NUMERAL": "[0-9一二三四五六七八九十]+"
+ },
+ "rules": [
+  {
+   "why": "E-mail addresses.",
+   "pattern": "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}",
+   "replace": "＊"
+  },
+  {
+   "why": "Addresses whose \"://\" the corpus lost: httpwww.bilibili.com…, httpmp.weixin.qq.com…",
+   "pattern": "(?i)(?<![A-Za-z])https?:?/{0,2}(?=www\\.|(?:[a-z0-9\\-]+\\.)+{{TLD}}){{URL_END}}",
+   "replace": "＊"
+  },
+  {
+   "why": "Web addresses from wherever http:// or www. starts, no \\b: Chinese characters count as word characters, so 网址http://… had none, and glued text (7http://…, increasewww.…) has none either.",
+   "pattern": "(?i)(?:https?://|www\\.){{URL_END}}",
+   "replace": "＊"
+  },
+  {
+   "why": "Bare domains in small letters, as they are written (user.Info in code is not one).",
+   "pattern": "(?<![A-Za-z0-9@.])(?:[a-z0-9](?:[a-z0-9\\-]{0,61}[a-z0-9])?\\.)+{{TLD}}(?:\\.[a-z]{2})?(?::\\d+)?(?![A-Za-z0-9])(?:/{{URL_END}})?",
+   "replace": "＊"
+  },
+  {
+   "why": "Suffixes that are also file extensions or words (index.md, req.params.id): a domain only with a path or a query after it (now.to/x5c).",
+   "pattern": "(?<![A-Za-z0-9@.])(?:[a-z0-9](?:[a-z0-9\\-]{0,61}[a-z0-9])?\\.)+{{TLD_PATH}}(?:\\.[a-z]{2})?(?::\\d+)?(?=[/?]){{URL_END}}",
+   "replace": "＊"
+  },
+  {
+   "why": "The account after 微信, QQ and the like, within one line ([ \\t], never \\s, which would reach into the next line).",
+   "pattern": "((?:微信|[vV]信|威信|薇信|扣扣|抖音|快手|支付宝|淘宝|旺旺|钉钉|小红书)[ \\t]*(?:号码|号|群)?[ \\t]*[:：]?[ \\t]*)[A-Za-z0-9][\\-_A-Za-z0-9]{4,19}(?![\\-_A-Za-z0-9])",
+   "replace": "$1＊"
+  },
+  {
+   "why": "Latin names only before 号 or a colon (wxWidgets is not an account).",
+   "pattern": "(?i)((?<![A-Za-z\\-])(?:weixin|vx|wx|qq|line|skype|telegram|tg)(?:[ \\t]*(?:号码|号|群|id)[ \\t]*[:：]?[ \\t]*|[ \\t]*[:：][ \\t]*))[A-Za-z0-9][\\-_.A-Za-z0-9]{4,29}(?![\\-_A-Za-z0-9])",
+   "replace": "$1＊"
+  },
+  {
+   "why": "…or before a space and an account with a digit (\"go on QQ immediately\" is not one).",
+   "pattern": "(?i)((?<![A-Za-z])(?:weixin|vx|wx|qq)[ \\t]+)(?=[\\-_A-Za-z]*\\d)[A-Za-z0-9][\\-_A-Za-z0-9]{4,19}(?![\\-_A-Za-z0-9])",
+   "replace": "$1＊"
+  },
+  {
+   "why": "The name after 姓名, 联系人, 收件人 (姓名学 is not a field).",
+   "pattern": "((?:真实姓名|姓名|联系人|收件人|收货人|户名)(?:[ \\t]*[:：][ \\t]*|[ \\t]+))[一-鿿·]{2,5}",
+   "replace": "$1＊"
+  },
+  {
+   "why": "The name after \"@\", up to 20 characters (a chat app puts a space after the name). Not \"@＊\" again: the store redacts its records anew at every start, so every rule must leave its own output as it is.",
+   "pattern": "@(?!＊)[^\\s@＊，。、；：！？,;:!?（）()【】\\[\\]《》<>“”\\\"'…]{1,20}",
+   "replace": "@＊"
+  },
+  {
+   "why": "Building, unit and room of an address: 3号楼2单元401.",
+   "pattern": "\\d+(?:号楼|栋|幢|座)[ \\t]*(?:{{NUMERAL}}单元)?[ \\t]*\\d{2,4}(?:室|号)?",
+   "replace": "＊"
+  },
+  {
+   "why": "Unit and room: 第二单元104.",
+   "pattern": "(?:第?{{NUMERAL}}单元)[ \\t]*\\d{3,4}(?:室|号)?(?!\\d)",
+   "replace": "＊"
+  },
+  {
+   "why": "Floor and room: 11楼1211 (not 8楼1000块).",
+   "pattern": "(?<!\\d)\\d+楼\\d{3,4}(?:室|号)?(?![\\d元块万千百个人次年米])",
+   "replace": "＊"
+  },
+  {
+   "why": "Room: 4603室.",
+   "pattern": "(?<!\\d)\\d{3,4}(?=室)",
+   "replace": "＊"
+  },
+  {
+   "why": "Licence plates.",
+   "pattern": "[{{PROVINCE}}][A-Z][·•]?[A-HJ-NP-Z0-9]{5,6}(?![A-Za-z0-9])",
+   "replace": "＊"
+  },
+  {
+   "why": "Letters and digits mixed, 20 or more, with many digits (link parameters, keys, check codes, file names); replaced only when a quarter of the run is digits, or it is 40 or more long with a tenth digits, so names with a digit or two stay (CanvasRenderingContext2D).",
+   "pattern": "(?<![A-Za-z0-9])(?=[A-Za-z]*\\d)(?=\\d*[A-Za-z])[A-Za-z0-9]{20,}(?![A-Za-z0-9])",
+   "generated": true
+  },
+  {
+   "why": "A bank card number written in groups of four.",
+   "pattern": "(?<!\\d)\\d{4}(?:[ \\-]\\d{4}){2,3}(?:[ \\-]\\d{1,4})?(?!\\d)",
+   "replace": "＊"
+  },
+  {
+   "why": "A phone number written 3-4-4.",
+   "pattern": "(?<!\\d)1\\d{2}[ \\-]\\d{4}[ \\-]\\d{4}(?!\\d)",
+   "replace": "＊"
+  },
+  {
+   "why": "Six or more digits in a row (phone, ID card with its final X, bank card, codes). Dates and times such as 2016-07-20 11:30, or numbers merely next to each other, are not one run.",
+   "pattern": "\\d{6,}[Xx]?",
+   "replace": "＊"
+  }
+ ]
+}

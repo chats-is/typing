@@ -1,0 +1,9 @@
+# The Python environment of the data, lexicon and training tools (Python 3.12):
+#   python3.12 -m venv Data/venv-train && Data/venv-train/bin/pip install -r Training/requirements.txt
+torch==2.14.1
+coremltools==9.0
+numpy==2.5.3
+pyarrow==25.0.1
+pypinyin==0.55.0
+# Only for the OpenIME data on Google Drive (Tools/fetch_data.py).
+gdown==6.4.1

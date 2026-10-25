@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    name: Build and gate
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      # The lexicon, bigram model and language model come through Git LFS. They are cached so the
+      # LFS bandwidth quota is spent once per change of the files, not on every run.
+      - name: LFS file list
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-ids
+      - uses: actions/cache@v4
+        id: lfs-cache
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-ids') }}
+      - name: Fetch LFS files
+        run: git lfs pull
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Key handling tests
+        run: Scripts/symtest.sh
+
+      - name: Word tests
+        run: |
+          E="$(swift build -c release --show-bin-path)/enginecli"
+          R=Resources
+          for f in Data/eval_word_full.tsv Data/eval_word_mixed.tsv Data/eval_word_initials.tsv Data/eval_word_english.tsv; do
+            printf '%-28s ' "$(basename "$f")"
+            "$E" --model $R/LanguageModel.mlmodelc --vocab $R/vocab.json --lexicon $R/lexicon.sqlite --bigram $R/bigram.bin --eval "$f" | grep "sentences:"
+          done
+
+      - name: App bundle
+        run: Scripts/build.sh
