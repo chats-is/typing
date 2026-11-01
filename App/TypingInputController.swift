@@ -1,10 +1,11 @@
+import Carbon
 import Cocoa
 import Engine
 import InputMethodKit
 
 @objc(TypingInputController)
 class TypingInputController: IMKInputController {
-    private static let panel = CandidatePanel()
+    static let panel = CandidatePanel()
     private static let pageSize = 9
     private static let noReplacement = NSRange(location: NSNotFound, length: NSNotFound)
 
@@ -15,12 +16,20 @@ class TypingInputController: IMKInputController {
         "`": "·", "{": "「", "}": "」", "|": "｜",
     ]
 
-    private let session: InputSession = {
-        let session = InputSession(decoder: EngineHost.decoder)
-        return session
-    }()
-    private var page = 0
-    private var highlight = 0
+    /// Shared with the candidate panel across controllers: a webpage that replaces its <input> on
+    /// URL-parameter updates creates a new client controller mid-composition.
+    private static let sharedSession = InputSession(decoder: EngineHost.decoder)
+    private var session: InputSession { Self.sharedSession }
+    private static var sharedPage = 0
+    private var page: Int {
+        get { Self.sharedPage }
+        set { Self.sharedPage = newValue }
+    }
+    private static var sharedHighlight = 0
+    private var highlight: Int {
+        get { Self.sharedHighlight }
+        set { Self.sharedHighlight = newValue }
+    }
     /// Chinese or plain English typing: Shift alone toggles (the keys are set in Settings; Caps Lock,
     /// if it is bound, means its state: lock on = English). One state for every
     /// application, as with the system's input methods (a controller exists per client).
@@ -57,11 +66,11 @@ class TypingInputController: IMKInputController {
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
-        if session.onUpdate == nil {
-            session.onUpdate = { [weak self] in
-                guard let self, self.session.isComposing, let client = self.client() else { return }
-                self.updateUI(client, refined: true)
-            }
+        Self.isServerActive = true
+        Self.deactivationID &+= 1
+        session.onUpdate = { [weak self] in
+            guard let self, self.session.isComposing, let client = self.client() else { return }
+            self.updateUI(client, refined: true)
         }
         // A key may move the caret; the model's later update of the same composition does not.
         cachedCaret = nil
@@ -112,10 +121,19 @@ class TypingInputController: IMKInputController {
 
     override func commitComposition(_ sender: Any!) {
         guard let client = sender as? IMKTextInput else { return }
+        // A webpage <input> that updates URL parameters or rewrites its value on `input` triggers
+        // discardMarkedText / commitComposition immediately after setMarkedText while no mouse
+        // click has occurred; keep the composition and candidate panel open.
+        if session.isComposing, Self.isReactingToMark(client: client) {
+            Self.didDiscardMark = true
+            return
+        }
         commitRaw(client)
     }
 
     override func activateServer(_ sender: Any!) {
+        Self.isServerActive = true
+        Self.deactivationID &+= 1
         super.activateServer(sender)
         // The lock may have been switched while another input source was active.
         let on = NSEvent.modifierFlags.contains(.capsLock)
@@ -127,9 +145,64 @@ class TypingInputController: IMKInputController {
 
     override func deactivateServer(_ sender: Any!) {
         finishEnglishToken()
-        if let client = sender as? IMKTextInput { commitRaw(client) }
+        // When a webpage switches URL parameters on `input`, the browser may blur/re-mount the
+        // <input> and call deactivateServer before re-activating; defer closing briefly so the
+        // re-mounted <input> keeps the composition, or close if nothing re-activates.
+        if session.isComposing, Self.isReactingToMark(client: sender as? IMKTextInput) {
+            Self.didDiscardMark = true
+            Self.isServerActive = false
+            Self.deactivationID &+= 1
+            let id = Self.deactivationID
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.markReactionWindow) {
+                if Self.deactivationID == id, !Self.isServerActive {
+                    Self.hidePanel()
+                }
+            }
+        } else {
+            if let client = sender as? IMKTextInput { commitRaw(client) }
+            Self.hidePanel()
+        }
         recentText = ""
         super.deactivateServer(sender)
+    }
+
+    /// Time window after `setMarkedText` during which a client-initiated `commitComposition` or
+    /// `deactivateServer` without any mouse/trackpad click or app/source switch is treated as the
+    /// webpage reacting to the `input` event (e.g. updating URL parameters or re-mounting `<input>`).
+    private static let markReactionWindow: TimeInterval = 0.25
+    private static var lastMarkTime: TimeInterval = -.infinity
+    private static var didDiscardMark = false
+    private static var isServerActive = false
+    private static var deactivationID = 0
+
+    private static func isReactingToMark(client: IMKTextInput?) -> Bool {
+        let elapsed = ProcessInfo.processInfo.systemUptime - lastMarkTime
+        guard elapsed >= 0, elapsed < markReactionWindow,
+              NSEvent.pressedMouseButtons == 0,
+              isCurrentInputSource
+        else { return false }
+        if Bundle.main.bundleIdentifier != nil {
+            for button in [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown] {
+                if CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: button) <= elapsed {
+                    return false
+                }
+            }
+            if let clientBundle = client?.bundleIdentifier(),
+               let frontBundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+               clientBundle != frontBundle {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static var isCurrentInputSource: Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier,
+              let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let ptr = TISGetInputSourceProperty(source, kTISPropertyBundleID)
+        else { return true }
+        let currentID = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        return currentID == bundleID
     }
 
     // MARK: - Keys
@@ -194,6 +267,8 @@ class TypingInputController: IMKInputController {
         // Lowercase letters are pinyin; capitals typed while composing stay as they are (对PC行业 from duiPChangye).
         if let character, character.isASCII, character.isLowercase || (session.isComposing && character.isUppercase) {
             if !session.isComposing {
+                lastPreedit = ""
+                Self.didDiscardMark = false
                 let before = textBeforeCursor(client)
                 if !before.isEmpty { recentText = before }
                 session.precedingText = recentText
@@ -458,7 +533,10 @@ class TypingInputController: IMKInputController {
     }
 
     private func commit(_ text: String, client: IMKTextInput, learned: Bool = true) {
-        client.insertText(text, replacementRange: Self.noReplacement)
+        let replacement = replacementRange(for: client)
+        Self.didDiscardMark = false
+        lastPreedit = ""
+        client.insertText(text, replacementRange: replacement)
         remember(text)
         if learned, !session.lastCommittedKeys.isEmpty {
             Learning.recordCommit(keys: session.lastCommittedKeys, text: text, context: session.lastCommittedContext)
@@ -508,13 +586,11 @@ class TypingInputController: IMKInputController {
         return client.attributedSubstring(from: range)?.string ?? ""
     }
 
-    /// Where the text cursor is on screen, found the same way as while composing
-    /// (asking for the rect of the selected range returns garbage in some applications).
+    /// Where the text cursor is on screen, found the same way as while composing; the candidate
+    /// panel's last place when the application reports none (the model's later update included).
     private func caretRect(_ client: IMKTextInput) -> NSRect {
-        if let cachedCaret { return cachedCaret }
-        var rect = NSRect.zero
-        client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
-        cachedCaret = rect
+        if cachedCaret == nil { cachedCaret = queryCaret(client) }
+        let rect = cachedCaret ?? .zero
         return rect.origin == .zero ? Self.panel.anchor : rect
     }
 
@@ -522,16 +598,63 @@ class TypingInputController: IMKInputController {
     /// candidate panel then keeps its last place; the language mark is not shown).
     private func reportedCaret(_ client: IMKTextInput) -> NSRect? {
         if cachedCaret == nil {
-            var rect = NSRect.zero
-            client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
-            cachedCaret = rect
+            cachedCaret = queryCaret(client)
         }
         guard let rect = cachedCaret, rect.origin != .zero else { return nil }
         return rect
     }
 
+    /// The line rectangle at the composition's first character, as applications report it. A
+    /// caret lies in one of the application's own windows: when that rectangle is missing
+    /// (Spotlight) or does not lie in one, the first rectangle of the marked range is taken instead
+    /// if it does, or, the windows being unknown, if it is on a screen (it is garbage in Chrome and
+    /// a line lower in Terminal, so never first).
+    private func queryCaret(_ client: IMKTextInput) -> NSRect {
+        var line = NSRect.zero
+        client.attributes(forCharacterIndex: 0, lineHeightRectangle: &line)
+        let windows = Self.windowFrames(client)
+        let place = windows.isEmpty ? NSScreen.screens.map(\.frame) : windows
+        if line.origin != .zero && (windows.isEmpty || Self.lies(line, in: windows)) { return line }
+        let marked = client.markedRange()
+        guard marked.location != NSNotFound else { return line }
+        let first = client.firstRect(forCharacterRange: NSRange(location: marked.location, length: 0), actualRange: nil)
+        guard first.origin != .zero, first.height.isFinite, first.height > 0, first.height < 200,
+              Self.lies(first, in: place) else { return line }
+        return NSRect(x: first.minX, y: first.minY, width: 1, height: first.height)
+    }
+
+    /// Whether a caret rectangle starts inside one of the frames.
+    private static func lies(_ rect: NSRect, in frames: [NSRect]) -> Bool {
+        guard rect.minX.isFinite, rect.midY.isFinite else { return false }
+        let point = NSPoint(x: rect.minX, y: rect.midY)
+        return frames.contains { $0.contains(point) }
+    }
+
+    /// The on-screen windows of the client's application, in screen coordinates (empty when
+    /// unknown: the reported rectangle is then used as it is). Replaceable for the tests.
+    static var windowFrames: (IMKTextInput) -> [NSRect] = { client in
+        guard let id = client.bundleIdentifier(), let primary = NSScreen.screens.first?.frame else { return [] }
+        let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: id).map(\.processIdentifier))
+        guard !pids.isEmpty,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+        return list.compactMap { window in
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
+                  let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds)
+            else { return nil }
+            // Window bounds count down from the top of the primary screen.
+            return NSRect(x: frame.minX, y: primary.maxY - frame.maxY, width: frame.width, height: frame.height)
+        }
+    }
+
     /// Closes the shared candidate panel and the language mark (another application came to the front).
     static func hidePanel() {
+        sharedSession.reset()
+        sharedPage = 0
+        sharedHighlight = 0
+        sharedLastPreedit = ""
+        didDiscardMark = false
         panel.hide()
         ModeIndicator.shared.hide()
     }
@@ -542,17 +665,48 @@ class TypingInputController: IMKInputController {
     /// sent: both client calls are synchronous round trips, so the model's later update of the
     /// same composition reuses the rectangle and skips the marked text when it has not changed.
     private var cachedCaret: NSRect?
-    private var lastPreedit = ""
+    private static var sharedLastPreedit = ""
+    private var lastPreedit: String {
+        get { Self.sharedLastPreedit }
+        set { Self.sharedLastPreedit = newValue }
+    }
+
+    /// The range to replace when updating or committing the composition: normally the client's own
+    /// marked range (noReplacement), or, when the client has cleared its mark while rewriting its
+    /// value on input, the preedit text still sitting before the cursor.
+    private func replacementRange(for client: IMKTextInput) -> NSRange {
+        guard Self.didDiscardMark, !lastPreedit.isEmpty, client.markedRange().location == NSNotFound else {
+            return Self.noReplacement
+        }
+        let selection = client.selectedRange()
+        for candidate in [lastPreedit, lastPreedit.filter { !$0.isWhitespace }] where !candidate.isEmpty {
+            let length = candidate.utf16.count
+            if selection.location != NSNotFound, selection.location >= length {
+                let range = NSRange(location: selection.location - length, length: length)
+                if client.attributedSubstring(from: range)?.string == candidate { return range }
+            }
+        }
+        return Self.noReplacement
+    }
 
     private func updateUI(_ client: IMKTextInput, refined: Bool = false) {
         let preedit = session.preedit
+        if !refined, session.isComposing {
+            Self.lastMarkTime = ProcessInfo.processInfo.systemUptime
+        }
         if !refined || preedit != lastPreedit {
-            let attributes: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
-            client.setMarkedText(
-                NSAttributedString(string: preedit, attributes: attributes),
-                selectionRange: NSRange(location: preedit.utf16.count, length: 0),
-                replacementRange: Self.noReplacement
-            )
+            let replacement = replacementRange(for: client)
+            Self.didDiscardMark = false
+            if preedit.isEmpty, replacement.location != NSNotFound {
+                client.insertText("", replacementRange: replacement)
+            } else {
+                let attributes: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
+                client.setMarkedText(
+                    NSAttributedString(string: preedit, attributes: attributes),
+                    selectionRange: NSRange(location: preedit.utf16.count, length: 0),
+                    replacementRange: replacement
+                )
+            }
             lastPreedit = preedit
         }
 

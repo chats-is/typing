@@ -6,12 +6,28 @@ import InputMethodKit
 enum EngineHost {
     static let scorer: NeuralScorer? = nil
     static var sentenceScorer: SentenceScorer? = nil
-    static var lexiconDecoder: LexiconDecoder? { decoder as? LexiconDecoder }
     /// The real lexicon without the model (deterministic), so candidate paging can be tested.
-    static let decoder: CandidateDecoding? = {
+    static let lexiconDecoder: LexiconDecoder? = {
         guard let lexicon = try? Lexicon(path: "Resources/lexicon.sqlite") else { return nil }
         return LexiconDecoder(lexicon: lexicon, scorer: nil, bigram: try? BigramModel(path: "Resources/bigram.bin"))
     }()
+    static let decoder: CandidateDecoding? = lexiconDecoder.map(LaterLookDecoder.init)
+}
+
+/// The lexicon decoder, with the model's second look stood in for while `on` is set: it reverses
+/// the candidates, so what the host does with the later update can be tested without a model.
+final class LaterLookDecoder: CandidateDecoding {
+    static var on = false
+    let base: CandidateDecoding
+    init(_ base: CandidateDecoding) { self.base = base }
+    func decode(_ input: String, precedingText: String) -> DecodeResult {
+        var result = base.decode(input, precedingText: precedingText)
+        if Self.on, result.candidates.count > 1 {
+            let quick = result
+            result.refine = { _ in DecodeResult(candidates: quick.candidates.reversed(), sentences: quick.sentences, segmented: quick.segmented) }
+        }
+        return result
+    }
 }
 
 /// A text field as the input method sees it: text, cursor, marked range.
@@ -34,7 +50,7 @@ final class FakeClient: NSObject, IMKTextInput {
     }
     func setMarkedText(_ string: Any!, selectionRange: NSRange, replacementRange: NSRange) {
         let s = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
-        let range = marked ?? NSRange(location: cursor, length: 0)
+        let range = replacementRange.location != NSNotFound ? replacementRange : (marked ?? NSRange(location: cursor, length: 0))
         text.replaceCharacters(in: range, with: s)
         let length = (s as NSString).length
         marked = length > 0 ? NSRange(location: range.location, length: length) : nil
@@ -50,7 +66,9 @@ final class FakeClient: NSObject, IMKTextInput {
     }
     func length() -> Int { text.length }
     func characterIndex(for point: NSPoint, tracking: IMKLocationToOffsetMappingMode, inMarkedRange: UnsafeMutablePointer<ObjCBool>!) -> Int { 0 }
-    func attributes(forCharacterIndex index: Int, lineHeightRectangle: UnsafeMutablePointer<NSRect>!) -> [AnyHashable: Any]! { lineHeightRectangle?.pointee = NSRect(x: 100, y: 100, width: 1, height: 16); return [:] }
+    /// What the application answers for the line rectangle (.zero: nothing).
+    var lineAnswer = NSRect(x: 100, y: 100, width: 1, height: 16)
+    func attributes(forCharacterIndex index: Int, lineHeightRectangle: UnsafeMutablePointer<NSRect>!) -> [AnyHashable: Any]! { lineHeightRectangle?.pointee = lineAnswer; return [:] }
     func validAttributesForMarkedText() -> [Any]! { [] }
     func overrideKeyboard(withKeyboardNamed keyboardUniqueName: String!) {}
     func selectMode(_ modeName: String!) {}
@@ -60,7 +78,9 @@ final class FakeClient: NSObject, IMKTextInput {
     func supportsProperty(_ property: TSMDocumentPropertyTag) -> Bool { false }
     func uniqueClientIdentifierString() -> String! { "fake" }
     func string(from range: NSRange, actualRange: NSRangePointer!) -> String! { text.substring(with: range) }
-    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer!) -> NSRect { .zero }
+    /// What the application answers for the first rectangle of a range (.zero: nothing).
+    var firstRectAnswer = NSRect.zero
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer!) -> NSRect { firstRectAnswer }
 
     // What the application itself does with keys the input method leaves to it.
     func appHandles(_ event: NSEvent) {
@@ -479,6 +499,117 @@ print((!afterPrompt ? "ok   " : "FAIL ") + "learning record: nothing kept after 
 let offered = Learning.store.typedEnglish("dont") == ["don't"]
 print((offered ? "ok   " : "FAIL ") + "a recorded English word is offered for its letters (dont → don't)"); if !offered { failures += 1 }
 key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+
+// Where the candidates go: the line rectangle the application reports (100, 100) when it lies in one
+// of the application's windows; otherwise its first rectangle of the marked range, if that one does.
+func panelPlace(windows: [NSRect], line: NSRect = NSRect(x: 100, y: 100, width: 1, height: 16), firstRect answer: NSRect) -> NSPoint {
+    let windowFrames = TypingInputController.windowFrames
+    TypingInputController.windowFrames = { _ in windows }
+    client.lineAnswer = line
+    client.firstRectAnswer = answer
+    type("ni")
+    let place = TypingInputController.panel.anchor.origin
+    key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+    client.firstRectAnswer = .zero
+    client.lineAnswer = NSRect(x: 100, y: 100, width: 1, height: 16)
+    TypingInputController.windowFrames = windowFrames
+    return place
+}
+let around = NSRect(x: 0, y: 0, width: 800, height: 600)        // holds the line rectangle
+let elsewhere = NSRect(x: 300, y: 600, width: 600, height: 60)  // does not
+let inside = NSRect(x: 320, y: 620, width: 1, height: 16)
+let garbage = NSRect(x: 1.6e-314, y: 8272.9, width: 1.6e-314, height: -1)
+for (name, windows, answer, expected) in [
+    ("line rectangle in the window → it, whatever the first rectangle", [around], inside, NSPoint(x: 100, y: 100)),
+    ("windows unknown → the line rectangle", [], inside, NSPoint(x: 100, y: 100)),
+    ("line rectangle outside, first rectangle garbage → the line rectangle", [elsewhere], garbage, NSPoint(x: 100, y: 100)),
+    ("line rectangle outside, first rectangle outside too → the line rectangle", [elsewhere], NSRect(x: 100, y: 117, width: 7, height: 17), NSPoint(x: 100, y: 100)),
+    ("line rectangle outside, first rectangle in the window → the first rectangle", [elsewhere], inside, inside.origin),
+] {
+    let place = panelPlace(windows: windows, firstRect: answer)
+    let ok = place == expected
+    print((ok ? "ok   " : "FAIL ") + "candidates placed: \(name) (\(place))"); if !ok { failures += 1 }
+}
+// No line rectangle at all (Spotlight): the first rectangle where it lies in a window, or, the windows
+// unknown, on a screen; otherwise the candidates keep their last place.
+let onScreen = NSScreen.screens.contains { $0.frame.contains(NSPoint(x: inside.minX, y: inside.midY)) }
+for (name, windows, answer, expected) in [
+    ("no line rectangle, first rectangle in the window → the first rectangle", [elsewhere], inside, inside.origin),
+    ("no line rectangle, windows unknown, first rectangle on a screen → the first rectangle", [], inside, inside.origin),
+    ("no line rectangle, first rectangle outside the window → the last place", [around.offsetBy(dx: 900, dy: 0)], NSRect(x: 100, y: 117, width: 7, height: 17), inside.origin),
+    ("no line rectangle, first rectangle garbage → the last place", [], garbage, inside.origin),
+] where onScreen || !windows.isEmpty {
+    let place = panelPlace(windows: windows, line: .zero, firstRect: answer)
+    let ok = place == expected
+    print((ok ? "ok   " : "FAIL ") + "candidates placed: \(name) (\(place))"); if !ok { failures += 1 }
+}
+
+// The model's later update of the same keystroke keeps the candidates where the first showing put
+// them when the application reports no cursor (it used to send them to the screen's corner).
+LaterLookDecoder.on = true
+let reordered = EngineHost.decoder?.decode("nihao", precedingText: "").refine?({ false }) != nil ? "nihao" : nil
+if let word = reordered {
+    let windowFrames = TypingInputController.windowFrames
+    TypingInputController.windowFrames = { _ in [] }
+    type(String(word.prefix(1)))
+    let before = TypingInputController.panel.anchor.origin
+    client.lineAnswer = .zero
+    type(String(word.dropFirst()))
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 1.5))  // the model's look has landed
+    let after = TypingInputController.panel.anchor.origin
+    let ok = after == before && after != .zero
+    print((ok ? "ok   " : "FAIL ") + "candidates stay put through the model's update when no cursor is reported (\(word): \(before) → \(after))"); if !ok { failures += 1 }
+    key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+    client.lineAnswer = NSRect(x: 100, y: 100, width: 1, height: 16)
+    TypingInputController.windowFrames = windowFrames
+} else {
+    print("FAIL no second look to test the later update with"); failures += 1
+}
+LaterLookDecoder.on = false
+
+// Webpage <input> that updates URL parameters and rewrites its value on `input`: the browser
+// clears its marked range and calls commitComposition / deactivateServer (+ activateServer on a
+// re-mounted <input>), yet the candidate panel stays open and the composition continues cleanly.
+if let expected = EngineHost.decoder?.decode("ni", precedingText: "").refined().candidates.first?.text {
+    type("n")
+    client.marked = nil  // browser discards mark when JS rewrites input.value
+    controller.commitComposition(client)
+    controller.deactivateServer(client)
+    let remounted = TestController(server: nil, delegate: nil, client: nil)!
+    remounted.activateServer(client)
+    let panelStaysOpen = TypingInputController.panel.isVisible
+    print((panelStaysOpen ? "ok   " : "FAIL ") + "URL-switching <input>: panel stays open across commitComposition/deactivateServer"); if !panelStaysOpen { failures += 1 }
+    let iEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                                  characters: "i", charactersIgnoringModifiers: "i", isARepeat: false, keyCode: 34)!
+    _ = remounted.handle(iEvent, client: client)
+    client.marked = nil
+    remounted.commitComposition(client)
+    let spaceEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                                      characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: SPACE)!
+    _ = remounted.handle(spaceEvent, client: client)
+    check("URL-switching <input>: n, i, space → \(expected) without duplicate letters", text: expected, cursor: expected.count)
+    type("n")
+    client.marked = nil
+    controller.commitComposition(client)
+    key("", code: DEL)
+    check("URL-switching <input>: n then Delete clears the unmarked letter", text: "", cursor: 0)
+    // After the reaction window expires (user pauses and then leaves the field), commitComposition
+    // commits raw letters and closes the candidate panel as usual.
+    type("ni")
+    Thread.sleep(forTimeInterval: 0.3)
+    controller.commitComposition(client)
+    let closedAfterPause = !TypingInputController.panel.isVisible && client.marked == nil
+    print((closedAfterPause ? "ok   " : "FAIL ") + "commitComposition after pause closes the panel and commits raw"); if !closedAfterPause { failures += 1 }
+    check("…text after delayed commitComposition", text: "ni", cursor: 2)
+    // If deactivateServer is not followed by activateServer (e.g. page navigated away with no input),
+    // the panel closes once the reaction window elapses.
+    type("ni")
+    controller.deactivateServer(client)
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
+    let closedWhenUnfocused = !TypingInputController.panel.isVisible
+    print((closedWhenUnfocused ? "ok   " : "FAIL ") + "deactivateServer without re-activation closes the panel"); if !closedWhenUnfocused { failures += 1 }
+    key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil; client.log = []
+}
 
 print(failures == 0 ? "ALL OK" : "\(failures) FAILURES")
 exit(failures == 0 ? 0 : 1)
