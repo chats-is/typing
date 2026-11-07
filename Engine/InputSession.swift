@@ -57,7 +57,8 @@ public final class InputSession {
         return confirmed.map(\.candidate.text).joined() + letters
     }
 
-    /// Appends a letter (capitals are kept as typed inside the composition) or a "'" separator.
+    /// Appends a letter (capitals are kept as typed inside the composition), a "'" separator, or a
+    /// digit that no candidate number claimed.
     public func insert(_ character: Character) {
         guard remaining.count < Self.maxBufferLength else { return }
         if character == "'" && (remaining.isEmpty || remaining.hasSuffix("'")) { return }

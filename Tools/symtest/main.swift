@@ -178,10 +178,10 @@ func keyMods(_ chars: String, code: UInt16, _ modifiers: NSEvent.ModifierFlags) 
     if !controller.handle(event, client: client) { client.appHandles(event) }
 }
 flags(56, [.shift]); flags(56, [])
-let markEnglish = ModeIndicator.shared.isVisible && !ModeIndicator.shared.showsChinese
+let markEnglish = ModeIndicator.shared.isVisible && !ModeIndicator.shared.showsChinese && ModeIndicator.shared.frame.size == NSSize(width: 30, height: 23)
 key("a", code: 0)
 let markGoes = !ModeIndicator.shared.isVisible
-print((markEnglish && markGoes ? "ok   " : "FAIL ") + "Shift alone → the mark shows English (hollow dots), and goes on the next key"); if !(markEnglish && markGoes) { failures += 1 }
+print((markEnglish && markGoes ? "ok   " : "FAIL ") + "Shift alone → the 30x23 mark shows English (hollow dots), and goes on the next key"); if !(markEnglish && markGoes) { failures += 1 }
 print((client.marked == nil && client.text as String == "a" ? "ok   " : "FAIL ") + "Shift alone → English (default)"); if !(client.marked == nil && client.text as String == "a") { failures += 1 }
 flags(56, [.shift]); flags(56, []); client.text = NSMutableString(); client.cursor = 0
 let markChinese = ModeIndicator.shared.isVisible && ModeIndicator.shared.showsChinese
@@ -197,6 +197,8 @@ do {
 do {
     let caret = NSRect(x: 400, y: 400, width: 1, height: 18)
     ModeIndicator.shared.show(chinese: true, near: caret)
+    let placed = ModeIndicator.shared.frame == NSRect(x: 385, y: 373, width: 30, height: 23)
+    print((placed ? "ok   " : "FAIL ") + "mark placed 4 pt below caret and centred on its left edge (\(ModeIndicator.shared.frame))"); if !placed { failures += 1 }
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 1.08))  // the fade has begun
     ModeIndicator.shared.show(chinese: false, near: caret)
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.35))  // past the old fade's end
@@ -258,7 +260,19 @@ type("ni")
 let clickHandled = controller.handle(click, client: client)
 print((!clickHandled && client.marked == nil ? "ok   " : "FAIL ") + "mouse click while composing → pinyin committed raw, event passed on"); if clickHandled || client.marked != nil { failures += 1 }
 check("…text after the click", text: "ni", cursor: 2)
-type("ni0."); check("ni, 0, . → candidate, 0 and an English .", text: (EngineHost.decoder?.decode("ni", precedingText: "").refined().candidates.first?.text ?? "ni") + "0.", cursor: 3)
+type("ni"); key("1", code: 18); check("ni, 1 → first candidate", text: EngineHost.decoder?.decode("ni", precedingText: "").refined().candidates.first?.text ?? "你", cursor: 1)
+type("ni0")
+let ni0 = EngineHost.decoder?.decode("ni0", precedingText: "").refined().candidates.first?.text ?? ""
+let ni0Shown = client.marked != nil && (client.text as String) == "ni0" && ni0.hasSuffix("0")
+print((ni0Shown ? "ok   " : "FAIL ") + "ni, 0 (no such candidate) stays input, candidate \(ni0): \"\(client.text)\""); if !ni0Shown { failures += 1 }
+key(".", code: 47); check("ni0, . → \(ni0).", text: ni0 + ".", cursor: ni0.count + 1)
+type("ipv"); key("1", code: 18); check("ipv, 1 → first candidate", text: EngineHost.decoder?.decode("ipv", precedingText: "").refined().candidates.first?.text ?? "IPv", cursor: 3)
+type("ipv6")
+let ipv6Shown = client.marked != nil && (client.text as String) == "ipv6"
+    && EngineHost.decoder?.decode("ipv6", precedingText: "").refined().candidates.first?.text == "IPv6"
+print((ipv6Shown ? "ok   " : "FAIL ") + "ipv6 stays composed and offers IPv6: \"\(client.text)\""); if !ipv6Shown { failures += 1 }
+key(" ", code: SPACE); check("ipv6, space → IPv6", text: "IPv6", cursor: 4)
+type("ipv6."); check("ipv6, . → IPv6.", text: "IPv6.", cursor: 5)
 type("nihao"); key("\r", code: 36); check("nihao, Return → pinyin as typed", text: "nihao", cursor: 5)
 // The "'" typed between letters stays when they go out as typed; picking a candidate is unchanged.
 func typeApostrophe(_ s: String) { for c in s { if c == "'" { key("'", code: 39) } else { type(String(c)) } } }
@@ -500,6 +514,66 @@ let offered = Learning.store.typedEnglish("dont") == ["don't"]
 print((offered ? "ok   " : "FAIL ") + "a recorded English word is offered for its letters (dont → don't)"); if !offered { failures += 1 }
 key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 
+// A terminal password prompt stays on the line (echo is off). Keys are typed as they are.
+// Putting the prompt back between keys is that: the test client would otherwise insert them.
+func secretLine(_ prompt: String, _ chars: String) -> Bool {
+    var ok = true
+    for c in chars {
+        client.text = NSMutableString(string: prompt)
+        client.cursor = (prompt as NSString).length
+        client.marked = nil
+        key(String(c), code: c == " " ? SPACE : (codes[c] ?? 0))
+        if client.marked != nil || (client.text as String) != prompt + String(c) { ok = false }
+    }
+    client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+    return ok
+}
+for prompt in ["Password:", "[sudo] password for john:", "user@host's password:", "请输入密码：", "请输入验证码：",
+               "Enter passphrase for key '/Users/john/.ssh/id_ed25519':", "PIN:"] {
+    let ok = secretLine(prompt, "a,1.")
+    print((ok ? "ok   " : "FAIL ") + "secret prompt types as English: \(prompt)"); if !ok { failures += 1 }
+}
+let sudoPrompt = "[sudo] password for john:"
+let passwordTyped = secretLine(sudoPrompt, "secret ")
+print((passwordTyped ? "ok   " : "FAIL ") + "sudo password prompt keeps the password and the space as typed"); if !passwordTyped { failures += 1 }
+for sentence in ["密码很好", "password is secret", "I forgot my password", "注意：密码不要告诉别人"] {
+    client.text = NSMutableString(string: sentence)
+    client.cursor = (sentence as NSString).length
+    client.marked = nil
+    key("n", code: 0)
+    let composing = client.marked != nil
+    print((composing ? "ok   " : "FAIL ") + "not a prompt, still Chinese: \(sentence)"); if !composing { failures += 1 }
+    key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+}
+let nextLine = "Password:\n$ "
+client.text = NSMutableString(string: nextLine)
+client.cursor = (nextLine as NSString).length
+key("n", code: 0)
+let resumed = client.marked != nil
+print((resumed ? "ok   " : "FAIL ") + "the next line after Password: is Chinese again"); if !resumed { failures += 1 }
+key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+// Pinyin already open when the line is a prompt: drop it, pass the key through.
+client.text = NSMutableString(string: "hello")
+client.cursor = 5
+type("ni")
+client.text = NSMutableString(string: "Password:")
+client.cursor = ("Password:" as NSString).length
+client.marked = nil
+key("a", code: 0)
+let dropped = client.marked == nil && (client.text as String) == "Password:a"
+print((dropped ? "ok   " : "FAIL ") + "pinyin open at Password: is dropped and the key is typed"); if !dropped { failures += 1 }
+key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
+for (text, expect) in [("Password:", true), ("[sudo] password for john:", true), ("hello\nPassword:", true),
+                       ("Password:\n$ ", false), ("密码很好", false), ("password is secret", false), ("spin:", false), ("PIN:", true),
+                       ("Enter passphrase for key '/Users/john/.ssh/id_ed25519':", true)] {
+    let got = Redaction.atSecretPrompt(text)
+    print((got == expect ? "ok   " : "FAIL ") + "atSecretPrompt [\(text)] → \(got)"); if got != expect { failures += 1 }
+}
+Thread.sleep(forTimeInterval: 3.2)
+Learning.store.flush()
+let leakedPassword = Learning.store.entries().contains { $0.text == "secret" || $0.keys == "secret" }
+print((!leakedPassword ? "ok   " : "FAIL ") + "a password typed at the prompt is not learned"); if leakedPassword { failures += 1 }
+
 // Where the candidates go: the line rectangle the application reports (100, 100) when it lies in one
 // of the application's windows; otherwise its first rectangle of the marked range, if that one does.
 func panelPlace(windows: [NSRect], line: NSRect = NSRect(x: 100, y: 100, width: 1, height: 16), firstRect answer: NSRect) -> NSPoint {
@@ -610,6 +684,48 @@ if let expected = EngineHost.decoder?.decode("ni", precedingText: "").refined().
     print((closedWhenUnfocused ? "ok   " : "FAIL ") + "deactivateServer without re-activation closes the panel"); if !closedWhenUnfocused { failures += 1 }
     key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil; client.log = []
 }
+
+func checkRule(_ name: String, _ ok: Bool) {
+    print((ok ? "ok   " : "FAIL ") + name)
+    if !ok { failures += 1 }
+}
+var memory = InputSourceMemory(wantsUs: false)
+memory.becameCurrent()
+memory.beginSuspension()
+memory.resigned(stillCurrent: false, userActed: true)
+checkRule("sleep while selected, wake on a keyboard layout → select again", memory.wantsUs && memory.endSuspension(currentIsKeyboardLayout: true))
+memory = InputSourceMemory(wantsUs: true)
+memory.beginSuspension()
+checkRule("sleep while selected, wake still on an input method → leave it", memory.endSuspension(currentIsKeyboardLayout: false) == false)
+memory = InputSourceMemory(wantsUs: false)
+memory.beginSuspension()
+checkRule("sleep while another source is selected → leave the keyboard layout", memory.endSuspension(currentIsKeyboardLayout: true) == false)
+memory = InputSourceMemory(wantsUs: true)
+memory.beginSuspension()
+let firstWake = memory.endSuspension(currentIsKeyboardLayout: true)
+checkRule("a second wake notice does not ask again", firstWake && memory.endSuspension(currentIsKeyboardLayout: true) == false)
+memory = InputSourceMemory(wantsUs: true)
+memory.beginSuspension()
+let earlyWake = memory.endSuspension(currentIsKeyboardLayout: false)
+checkRule("keyboard layout arrives after the wake notice → select again", earlyWake == false && memory.restoreAfterDrop(currentIsKeyboardLayout: true, userActed: false))
+memory = InputSourceMemory(wantsUs: true)
+memory.resigned(stillCurrent: false, userActed: true)
+checkRule("a key or a click switches away → stay away", memory.wantsUs == false && memory.restoreAfterDrop(currentIsKeyboardLayout: true, userActed: true) == false)
+memory = InputSourceMemory(wantsUs: true)
+memory.resigned(stillCurrent: false, userActed: false)
+checkRule("awake drop onto a keyboard layout with no key or click → select again", memory.wantsUs && memory.restoreAfterDrop(currentIsKeyboardLayout: true, userActed: false))
+memory = InputSourceMemory(wantsUs: true)
+memory.resigned(stillCurrent: true, userActed: false)
+checkRule("a client blur leaves the wish as it was", memory.wantsUs && memory.restoreAfterDrop(currentIsKeyboardLayout: false, userActed: false) == false)
+checkRule("relaunch onto a keyboard layout → select again", InputSourceMemory(wantsUs: true).restoreOnLaunch(currentIsKeyboardLayout: true))
+memory = InputSourceMemory(wantsUs: true)
+memory.beginSuspension()
+memory.noteAwake()
+memory.resigned(stillCurrent: false, userActed: true)
+checkRule("a key shows the machine is awake, and a switch then stands", memory.wantsUs == false && memory.endSuspension(currentIsKeyboardLayout: true) == false)
+checkRule("relaunch with no wish, or onto another input method → leave it",
+          InputSourceMemory(wantsUs: false).restoreOnLaunch(currentIsKeyboardLayout: true) == false
+            && InputSourceMemory(wantsUs: true).restoreOnLaunch(currentIsKeyboardLayout: false) == false)
 
 print(failures == 0 ? "ALL OK" : "\(failures) FAILURES")
 exit(failures == 0 ? 0 : 1)

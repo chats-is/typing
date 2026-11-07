@@ -124,6 +124,8 @@ public final class LexiconDecoder: CandidateDecoding {
     private static let retroflexInitials = Set("zcs".utf8)
     private static let apostrophe = UInt8(ascii: "'")
     private static func isCapital(_ byte: UInt8) -> Bool { byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z") }
+    private static func isLowerLetter(_ byte: UInt8) -> Bool { byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z") }
+    private static func isDigit(_ byte: UInt8) -> Bool { byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9") }
     private static let vowels = Set("aeiouv".utf8)
     public static let bos: Int32 = 1
 
@@ -493,9 +495,9 @@ public final class LexiconDecoder: CandidateDecoding {
         var phaseStarted = DispatchTime.now().uptimeNanoseconds
         func phase(_ k: Int) { let now = DispatchTime.now().uptimeNanoseconds; phaseMilliseconds[k] += Double(now - phaseStarted) / 1e6; phaseStarted = now }
         var steps = [[Step]](repeating: [], count: n)
-        for i in 0..<n where chars[i] != Self.apostrophe {
+        for i in 0..<n where chars[i] != Self.apostrophe && !Self.isDigit(chars[i]) {
             for j in (i + 1)...min(n, i + SyllableMatcher.maxTypedLength) {
-                if chars[j - 1] == Self.apostrophe { break }
+                if chars[j - 1] == Self.apostrophe || Self.isDigit(chars[j - 1]) { break }
                 for match in matcher.matches(slice(i, j), tolerant: tolerant) {
                     // Slips of the finger (not fuzzy sounds) scale with slipScale.
                     let penalty = match.penalty >= SyllableMatcher.minimumTypoPenalty ? match.penalty * slipScale : match.penalty
@@ -504,7 +506,7 @@ public final class LexiconDecoder: CandidateDecoding {
             }
             guard tolerant else { continue }
             for j in (i + 1)..<min(n, i + SyllableMatcher.maxTypedLength) {
-                if chars[j - 1] == Self.apostrophe || chars[j] == Self.apostrophe { break }
+                if chars[j - 1] == Self.apostrophe || chars[j] == Self.apostrophe || Self.isDigit(chars[j - 1]) || Self.isDigit(chars[j]) { break }
                 guard chars[j - 1] != chars[j] else { continue }
                 let first = slice(i, j - 1) + slice(j, j + 1)
                 guard lexicon.syllables.contains(first) else { continue }
@@ -604,12 +606,20 @@ public final class LexiconDecoder: CandidateDecoding {
             }
         }
 
-        // A run of letters may be an English word.
+        // A run of letters may be an English word. Digits typed right after the whole run belong to
+        // it (ipv6 → IPv6): the usual casing plus those digits, covering the digits as well.
         func english(start: Int) {
             // A single letter is the start of a syllable, never an English word.
-            guard start + 2 <= n else { return }
-            for j in (start + 2)...min(n, start + Self.maxEnglishLength) {
-                if chars[j - 1] == Self.apostrophe { break }
+            var letterEnd = start
+            let limit = min(n, start + Self.maxEnglishLength)
+            while letterEnd < limit, Self.isLowerLetter(chars[letterEnd]) { letterEnd += 1 }
+            guard letterEnd >= start + 2 else { return }
+            func add(_ text: String, key: String, end: Int, logp: Double) {
+                reachable[end] = true
+                edges.append(Edge(start: start, end: end, word: WordRef(text: text, wid: 0, key: key), logp: logp,
+                                  penalty: englishPenalty, cuts: [end], partial: false, english: true))
+            }
+            for j in (start + 2)...letterEnd {
                 // One or two letters typed on their own are a syllable's start or an abbreviation far
                 // more often than an English word: such an English reading pays what the abbreviation
                 // pays (initialPenalty per letter), and the frequencies decide. Inside a longer buffer
@@ -617,14 +627,27 @@ public final class LexiconDecoder: CandidateDecoding {
                 let letters = slice(start, j)
                 let table = timedLexicon({ lexicon.english(letters) })
                 for entry in table {
-                    reachable[j] = true
-                    edges.append(Edge(start: start, end: j, word: WordRef(text: entry.word, wid: 0, key: entry.key), logp: entry.logp,
-                                      penalty: englishPenalty, cuts: [j], partial: false, english: true))
+                    add(entry.word, key: entry.key, end: j, logp: entry.logp)
                 }
-                for word in typedEnglish?(letters) ?? [] where !table.contains(where: { $0.word == word }) {
-                    reachable[j] = true
-                    edges.append(Edge(start: start, end: j, word: WordRef(text: word, wid: 0, key: letters), logp: lexicon.englishFloor,
-                                      penalty: englishPenalty, cuts: [j], partial: false, english: true))
+                let learned = typedEnglish?(letters) ?? []
+                for word in learned where !table.contains(where: { $0.word == word }) {
+                    add(word, key: letters, end: j, logp: lexicon.englishFloor)
+                }
+                // Only the whole letter run takes the digits. A shorter word (ip inside ipv6) leaves them.
+                guard j == letterEnd else { continue }
+                var digitEnd = j
+                while digitEnd < n, Self.isDigit(chars[digitEnd]) { digitEnd += 1 }
+                // A Chinese word of these letters is itself followed by the digits (你0). The digits
+                // join the English casing only when nothing else reads the letters (ipv6 → IPv6).
+                guard digitEnd > j,
+                      !edges.contains(where: { $0.start == start && $0.end == j && !$0.english && $0.word.wid != 0 })
+                else { continue }
+                let digits = slice(j, digitEnd)
+                for entry in table {
+                    add(entry.word + digits, key: entry.key, end: digitEnd, logp: entry.logp)
+                }
+                for word in learned where !table.contains(where: { $0.word == word }) {
+                    add(word + digits, key: letters, end: digitEnd, logp: lexicon.englishFloor)
                 }
             }
         }
@@ -641,8 +664,25 @@ public final class LexiconDecoder: CandidateDecoding {
             return true
         }
 
+        /// A digit run is input. It stays on the word it follows (你0) instead of becoming another
+        /// word, and what is typed after it can still be read.
+        func digits(start: Int) -> Bool {
+            guard Self.isDigit(chars[start]) else { return false }
+            var end = start + 1
+            while end < n, Self.isDigit(chars[end]) { end += 1 }
+            reachable[end] = true
+            let extra = slice(start, end)
+            // Copy first: appending while iterating would walk the edges just added.
+            for edge in edges.filter({ $0.end == start }) {
+                edges.append(Edge(start: edge.start, end: end, word: WordRef(text: edge.word.text + extra, wid: edge.word.wid, key: edge.word.key),
+                                  logp: edge.logp, penalty: edge.penalty, cuts: edge.cuts, partial: edge.partial, english: edge.english))
+            }
+            return true
+        }
+
         for start in 0..<n where reachable[start] {
             if literal(start: start) { continue }
+            if digits(start: start) { continue }
             extend(start: start, position: start, key: "", cuts: [], penalty: 0, corrected: false)
             abbreviate(start: start, position: start, segments: [], cuts: [])
             english(start: start)
@@ -774,7 +814,7 @@ public final class LexiconDecoder: CandidateDecoding {
         // Syllables found by the decoder are shown apart; a typed "'" shows as typed (xi'an).
         var segmented = ""
         for (i, c) in chars.enumerated() {
-            if cuts.contains(i) && c != Self.apostrophe && segmented.last != " " && segmented.last != "'" { segmented += " " }
+            if cuts.contains(i) && c != Self.apostrophe && !Self.isDigit(c) && segmented.last != " " && segmented.last != "'" { segmented += " " }
             segmented += String(UnicodeScalar(c))
         }
         phase(4)

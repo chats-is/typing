@@ -46,9 +46,15 @@ public enum Redaction {
         return share >= 0.25 || (run.count >= 40 && share >= 0.1)
     }
 
-    /// Words that, just before the cursor, mean a secret is being typed (English ones as whole
-    /// words, so pinyin or spinning do not count).
-    private static let secretPrompt = try! NSRegularExpression(pattern: #"(?i)密码|口令|验证码|校验码|动态码|\b(?:password|passcode|pin|otp)\b"#)
+    /// Words that mean a secret is being typed (English ones as whole words, so pinyin or
+    /// spinning do not count). passphrase is the same prompt as password (ssh keys).
+    private static let secretWords = #"密码|口令|验证码|校验码|动态码|\b(?:password|passcode|passphrase|pin|otp)\b"#
+    private static let secretPrompt = try! NSRegularExpression(pattern: "(?i)" + secretWords)
+    /// The current line ends with one of those words, an optional "for …" (sudo, a key path)
+    /// and a colon. A mention earlier in the sentence does not.
+    private static let secretLine = try! NSRegularExpression(
+        pattern: "(?i)(?:" + secretWords + #")(?:\s+for\b[^\n\r]{0,480})?\s*[:：]\s*$"#
+    )
 
     /// The text with every sensitive run replaced by `mark`.
     public static func redact(_ text: String) -> String {
@@ -73,5 +79,15 @@ public enum Redaction {
     public static func asksForSecret(_ context: String) -> Bool {
         let tail = String(context.suffix(12))
         return secretPrompt.firstMatch(in: tail, range: NSRange(tail.startIndex..., in: tail)) != nil
+    }
+
+    /// Whether the cursor is at a secret prompt: the current line ends with one of those words
+    /// and a colon, optionally with "for" and a name or a path in between (Password:,
+    /// [sudo] password for name:, Enter passphrase for key …:). A sentence that only mentions
+    /// the word (密码很好, password is secret) does not.
+    public static func atSecretPrompt(_ context: String) -> Bool {
+        let line = context.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).last.map(String.init) ?? ""
+        guard !line.isEmpty else { return false }
+        return secretLine.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
     }
 }

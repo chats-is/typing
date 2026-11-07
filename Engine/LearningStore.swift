@@ -117,7 +117,7 @@ public final class LearningStore {
     public func record(keys: String, text: String, context: String, undoWindow: TimeInterval = 3) {
         // Nothing sensitive is stored: what follows a prompt for a password or a code is not
         // recorded, and addresses and long numbers are taken out of the rest (Redaction).
-        guard !Redaction.asksForSecret(context) else { return }
+        guard !Redaction.asksForSecret(context), !Redaction.atSecretPrompt(context) else { return }
         let text = Redaction.redact(text), context = String(Redaction.redact(context).suffix(60))
         guard Self.isRecordable(text) else { return }
         lock.lock(); defer { lock.unlock() }

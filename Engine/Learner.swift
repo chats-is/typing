@@ -304,8 +304,10 @@ public final class Learner {
             // always exactly a function of the entries listed in Settings, where they can be deleted.
             let shippedWeights = try weights.load()
             let hasTuned = store.hasTunedWeights
-            waitWhilePaused()
-            let personalCases = heldOut.map { Case(expected: $0.text, context: $0.context, readings: readings($0.keys, $0.context)) }
+            let personalCases = heldOut.map { entry -> Case in
+                waitWhilePaused()
+                return Case(expected: entry.text, context: entry.context, readings: readings(entry.keys, entry.context))
+            }
             let general = generalCases()
             let words = generalWordCases()
             let typed = typedCases(inputs)
@@ -318,10 +320,12 @@ public final class Learner {
             // Before and after are judged on the same runtime (the GPU one); the shipped model on
             // that runtime is the reference of the lone-word rule, so that with nothing learned
             // the rule moves nothing at all.
+            waitWhilePaused()
             let shipped: GraphScorer? = hasTuned ? try GraphScorer(weights: shippedWeights, vocabularyURL: vocabularyURL) : nil
             do {
                 // "Before" is what the engine ranks with now when that is the GPU runtime;
                 // otherwise built here and released again before training.
+                waitWhilePaused()
                 let before: SentenceScorer
                 if let engine = engineScorer?() {
                     before = engine

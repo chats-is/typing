@@ -14,9 +14,9 @@ final class ModeIndicator: NSPanel {
     private var generation = 0
     /// How long the mark stays before it fades.
     private static let shownFor: TimeInterval = 1.0
-    /// The system's bubble: a capsule 33 x 23 pt (round ends, a short straight middle) around the
-    /// 22 x 16 pt mark.
-    private static let size = NSSize(width: 33, height: 23)
+    /// The system's bubble: a capsule 30 x 23 pt (27 x 23 pt indicator with 1.5 pt margins on
+    /// left and right) around the 22 x 16 pt mark.
+    private static let size = NSSize(width: 30, height: 23)
 
     private init() {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -34,9 +34,10 @@ final class ModeIndicator: NSPanel {
     /// Which language the mark shows (filled dots: Chinese).
     var showsChinese: Bool { mark.chinese }
 
-    /// Shows the mark for `chinese` (or English) just below `caret`, a screen rect, centred on it as
-    /// the system's bubble is; it goes by itself after a moment. Without a caret (the application
-    /// reports none) nothing is shown: anywhere else would be the wrong place.
+    /// Shows the mark for `chinese` (or English) 4 pt below `caret`, a screen rect, centred on its
+    /// left edge as the system's bubble is (TUINSCursorUIController, TUICursorWindowMargin = 4); it
+    /// goes by itself after a moment. Without a caret (the application reports none) nothing is
+    /// shown: anywhere else would be the wrong place.
     func show(chinese: Bool, near caret: NSRect?) {
         guard let cursor = caret else {
             hide()
@@ -45,10 +46,10 @@ final class ModeIndicator: NSPanel {
         mark.chinese = chinese
         mark.needsDisplay = true
         let size = Self.size
-        var origin = NSPoint(x: cursor.midX - size.width / 2, y: cursor.minY - size.height - 3)
+        var origin = NSPoint(x: cursor.minX - size.width / 2, y: cursor.minY - size.height - 4)
         let screen = NSScreen.screens.first { $0.frame.contains(cursor.origin) } ?? NSScreen.main
         if let visible = screen?.visibleFrame {
-            if origin.y < visible.minY { origin.y = cursor.maxY + 3 }
+            if origin.y < visible.minY { origin.y = cursor.maxY + 4 }
             origin.x = max(visible.minX, min(origin.x, visible.maxX - size.width))
         }
         setFrame(NSRect(origin: origin, size: size), display: true)
@@ -86,15 +87,22 @@ final class ModeIndicator: NSPanel {
 }
 
 /// The bubble: a capsule in the accent colour, and the menu bar mark (Tools/make_icons.swift,
-/// menuIcon) in white at its own size.
+/// menuIcon) in white at the size the system's cursor indicator draws it.
 private final class ModeMark: NSView {
     var chinese = true
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.controlAccentColor.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-        // The 22 x 16 pt mark, centred; its coordinates as in make_icons (origin bottom left).
-        let x0 = (bounds.width - 22) / 2, y0 = (bounds.height - 16) / 2
+        // The system's indicator image is 30 x 23 pt with the 22 x 16 pt mark drawn at (4, 3):
+        // centred across, 3 pt from the bottom (not 3.5), so it sits half a point low. The image
+        // goes into the 27 x 23 pt indicator view between 1.5 pt side margins.
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        ctx.translateBy(x: 1.5, y: 0)
+        ctx.scaleBy(x: 27.0 / 30.0, y: 1.0)
+        let x0: CGFloat = 4, y0: CGFloat = 3
         NSColor.white.setStroke()
         NSColor.white.setFill()
         let capsule = NSRect(x: x0 + 1.15, y: y0 + 16 - 12.35, width: 19.7, height: 8.7)

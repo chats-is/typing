@@ -28,7 +28,7 @@ APP="/Library/Input Methods/Typing.app"
 USER_NAME="$(stat -f%Su /dev/console)"
 # A copy the system relaunched while the payload was being written still holds the old files:
 # stop it (only that one; the launch agent counts every exit, so no needless kills).
-INSTALLED_AT="$(stat -f%m "$APP/Contents/MacOS/Typing" 2>/dev/null || echo 0)"
+INSTALLED_AT="$(stat -f%c "$APP/Contents/MacOS/Typing" 2>/dev/null || echo 0)"
 for PID in $(pgrep -x Typing); do
     STARTED="$(LC_ALL=C ps -o lstart= -p "$PID" | xargs -I{} env LC_ALL=C date -j -f '%a %b %d %T %Y' '{}' +%s 2>/dev/null || echo 0)"
     [ "$STARTED" -lt "$INSTALLED_AT" ] && kill "$PID" 2>/dev/null || true

@@ -8,7 +8,8 @@ enum EngineHost {
 
     /// The model actually ranking: Core ML as shipped, or the GPU runtime with what this machine
     /// has learned once learning is on and a tuned file exists.
-    static var sentenceScorer: SentenceScorer? = Learning.initialScorer() ?? scorer
+    static let initialSentenceScorer: SentenceScorer? = Learning.initialScorer() ?? scorer
+    static var sentenceScorer: SentenceScorer? = initialSentenceScorer
     static var lexiconDecoder: LexiconDecoder? { decoder as? LexiconDecoder }
 
     /// The engine shared by every input controller: the lexicon says what the keys can be, the
@@ -69,12 +70,16 @@ NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActiva
     TypingInputController.hidePanel()
 }
 // The shipped and the tuned model each take over a second to load the first time after an update
-// (the system compiles them for the Neural Engine): load them side by side, not one after the other.
-let loading = DispatchGroup()
-DispatchQueue.global(qos: .userInitiated).async(group: loading) { _ = EngineHost.scorer }
-DispatchQueue.global(qos: .userInitiated).async(group: loading) { _ = EngineHost.sentenceScorer }
-loading.wait()
-// Warm up once at launch (model load, first Core ML call, lexicon caches) so the first keystroke
-// is as quick as the rest; the first decode otherwise takes over 100 ms.
-_ = EngineHost.decoder?.decode("nihao", precedingText: "").refined()
+// (the system compiles them for the Neural Engine): load them side by side in the background so
+// IMKServer enters the run loop and registers its XPC endpoint without delay.
+DispatchQueue.global(qos: .userInitiated).async {
+    let loading = DispatchGroup()
+    DispatchQueue.global(qos: .userInitiated).async(group: loading) { _ = EngineHost.scorer }
+    DispatchQueue.global(qos: .userInitiated).async(group: loading) { _ = EngineHost.initialSentenceScorer }
+    loading.wait()
+    // Warm up once at launch (model load, first Core ML call, lexicon caches) so the first keystroke
+    // is as quick as the rest; the first decode otherwise takes over 100 ms.
+    _ = EngineHost.decoder?.decode("nihao", precedingText: "").refined()
+}
+InputSourceKeeper.shared.start()
 NSApplication.shared.run()

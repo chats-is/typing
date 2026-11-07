@@ -49,6 +49,8 @@ class TypingInputController: IMKInputController {
     private var englishContext = ""
 
     private static let recentTextLength = 60
+    /// A secret prompt can carry a key path on the same line; only this check reads that far.
+    private static let secretPromptLength = 512
 
     private enum Key {
         static let returnKey: UInt16 = 36, tab: UInt16 = 48, space: UInt16 = 49, delete: UInt16 = 51, escape: UInt16 = 53, capsLock: UInt16 = 57
@@ -75,6 +77,7 @@ class TypingInputController: IMKInputController {
         // A key may move the caret; the model's later update of the same composition does not.
         cachedCaret = nil
         Learning.noteActivity()
+        InputSourceKeeper.shared.noteTyping()
         switch event.type {
         case .leftMouseDown, .rightMouseDown:
             // A click moves the cursor: what is being composed is committed as typed and every panel closes.
@@ -141,6 +144,7 @@ class TypingInputController: IMKInputController {
             Self.capsLockOn = on
             if ShortcutStore.shared.function(forModifierKey: Key.capsLock) == .toggleLanguage { Self.asciiMode = on }
         }
+        InputSourceKeeper.shared.noteActivated()
     }
 
     override func deactivateServer(_ sender: Any!) {
@@ -164,6 +168,7 @@ class TypingInputController: IMKInputController {
         }
         recentText = ""
         super.deactivateServer(sender)
+        InputSourceKeeper.shared.noteDeactivated()
     }
 
     /// Time window after `setMarkedText` during which a client-initiated `commitComposition` or
@@ -251,6 +256,20 @@ class TypingInputController: IMKInputController {
 
     private func handleKeyDown(_ event: NSEvent, client: IMKTextInput, afterDigit: Bool) -> Bool {
         if let function = ShortcutStore.shared.function(forKeyDown: event), perform(function, client: client) { return true }
+        // A terminal password prompt stays on screen (echo is off). Keys go through as typed:
+        // no pinyin, no Chinese marks. This is not the English-mode switch; Chinese resumes
+        // when this line no longer ends with the prompt. Nothing typed here is learned.
+        let character = event.characters?.count == 1 ? event.characters?.first : nil
+        if atSecretPrompt(client) {
+            if !englishToken.isEmpty { finishEnglishToken() }
+            if session.isComposing {
+                session.reset()
+                page = 0
+                highlight = 0
+                updateUI(client)
+            }
+            return false
+        }
         if !event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             finishEnglishToken()
             commitRaw(client)
@@ -259,7 +278,6 @@ class TypingInputController: IMKInputController {
         }
         // Caps Lock is the capitals lock, as in other third-party input methods: with it on the
         // keyboard reports capitals, and capitals go into the text as they are (not as pinyin).
-        let character = event.characters?.count == 1 ? event.characters?.first : nil
         if Self.asciiMode {
             trackEnglish(event, character: character, client: client)
             return false
@@ -301,8 +319,8 @@ class TypingInputController: IMKInputController {
             remember(String(character))
             return false
         }
-        // Keep "3.14" and "12:30" typable.
-        if afterDigit && (character == "." || character == ":") {
+        // Keep "3.14" and "12:30" typable, including a digit that arrived inside a word (IPv6.).
+        if (afterDigit || recentText.last?.isNumber == true) && (character == "." || character == ":") {
             remember(String(character))
             return false
         }
@@ -421,10 +439,17 @@ class TypingInputController: IMKInputController {
             return false
         case "=":
             turnPage(1, pageCount: pageCount, client: client)
-        case "1"..."9":
-            let index = Int(character.asciiValue! - UInt8(ascii: "1"))
-            if index < onPage { select(page * Self.pageSize + index, client: client) }
+        case "1"..."9" where Int(character.asciiValue! - UInt8(ascii: "1")) < onPage:
+            select(page * Self.pageSize + Int(character.asciiValue! - UInt8(ascii: "1")), client: client)
         default:
+            // No candidate carries this number: the digit is input (ipv6, ni0), not a selection.
+            if character.isNumber {
+                session.insert(character)
+                page = 0
+                highlight = 0
+                updateUI(client)
+                return true
+            }
             // Anything else ends the composition with the highlighted candidate, then types itself.
             if !session.candidates.isEmpty, let text = session.select(page * Self.pageSize + highlight) {
                 commit(text, client: client)
@@ -433,6 +458,11 @@ class TypingInputController: IMKInputController {
             }
             if character.isNumber {
                 // As when idle: a following . or : stays English (版本1.2, 12:30).
+                lastKeyWasDigit = true
+                remember(String(character))
+                return false
+            }
+            if (character == "." || character == ":"), recentText.last?.isNumber == true {
                 lastKeyWasDigit = true
                 remember(String(character))
                 return false
@@ -578,12 +608,17 @@ class TypingInputController: IMKInputController {
     }
 
     /// The text in front of the cursor, from clients that can report it; "" otherwise.
-    private func textBeforeCursor(_ client: IMKTextInput) -> String {
+    private func textBeforeCursor(_ client: IMKTextInput, length: Int = recentTextLength) -> String {
         let selection = client.selectedRange()
         guard selection.location != NSNotFound, selection.location > 0 else { return "" }
-        let start = max(0, selection.location - Self.recentTextLength)
+        let start = max(0, selection.location - length)
         let range = NSRange(location: start, length: selection.location - start)
         return client.attributedSubstring(from: range)?.string ?? ""
+    }
+
+    /// The cursor sits on a line that asks for a password or a code.
+    private func atSecretPrompt(_ client: IMKTextInput) -> Bool {
+        Redaction.atSecretPrompt(textBeforeCursor(client, length: Self.secretPromptLength))
     }
 
     /// Where the text cursor is on screen, found the same way as while composing; the candidate
