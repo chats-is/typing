@@ -50,20 +50,38 @@ jobs:
           Scripts/release/make_dmg.sh "$VERSION" dist
           Scripts/package_resources.sh dist
 
+      # Chinese notes: install, uninstall, and this release's changelog. No build number,
+      # no resources section, no gate log. Rewrite the changelog before each release.
       - name: Release notes
         run: |
-          {
-            echo "## 智能输入 $VERSION"
-            echo
-            echo "安装包 \`Typing-$VERSION.pkg\`：双击安装到 /Library/Input Methods 并启用（首次可能需要注销再登录）。"
-            echo "磁盘映像 \`Typing-$VERSION.dmg\`：打开后把 Typing.app 拖进 Input Methods，再到 系统设置 › 键盘 › 输入法 添加。"
-            echo "两者都是本机临时签名，首次打开需要在 系统设置 › 隐私与安全性 里允许。"
-            echo
-            echo "### 门槛"
-            echo '```'
-            sed -n '/== word tests/,$p' gate.log 2>/dev/null || true
-            echo '```'
-          } > notes.md
+          cat > notes.md <<EOF
+          ## 智能输入 $VERSION
+
+          本机拼音输入法。不联网。
+
+          ### 安装
+
+          - \`Typing-$VERSION.pkg\`：双击安装到 \`/Library/Input Methods\` 并启用。首次安装后如果输入法菜单里没有「智能输入」，注销再登录。
+          - \`Typing-$VERSION.dmg\`：打开后把 \`Typing.app\` 拖进 Input Methods，再到「系统设置 › 键盘 › 输入法」添加。
+          - 安装包是本机临时签名。首次打开时，到「系统设置 › 隐私与安全性」里允许。
+
+          ### 卸载
+
+          已安装时，在终端执行：
+
+          \`\`\`sh
+          "/Library/Input Methods/Typing.app/Contents/Resources/uninstall.sh"
+          \`\`\`
+
+          ### 更新记录
+
+          - 候选里没有对应编号的数字留在输入里。
+          - 网页在输入时改地址或重建输入框，已输入的内容保持；候选窗留在当前窗口里。
+          - 休眠、锁屏、显示器睡眠或输入法重新启动后，若离开前选中的是本输入法，而系统改成了键盘布局，则重新选中。
+          - 光标这一行以密码、口令、验证码或 password 等提示加冒号结尾时，按键原样上屏，不改中英文，不记学习。
+          - 启动时先接上输入，语言模型在后台加载。
+          - 卸载时先取消使用，再删除输入法、安装记录和可以删除的学习文件。
+          EOF
       - uses: softprops/action-gh-release@v2
         with:
           body_path: notes.md
