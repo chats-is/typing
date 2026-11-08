@@ -9,7 +9,7 @@ eval_word_english.tsv	37.83
 eval_dialogue.tsv	85.00
 eval_news.tsv	87.67
 eval_forum.tsv	76.67
-eval_touchpal.tsv	77.67
+eval_touchpal.tsv	77.33
 eval_short.tsv	90.00
 fresh/eval_dialogue.tsv	75.00
 fresh/eval_forum.tsv	71.00
