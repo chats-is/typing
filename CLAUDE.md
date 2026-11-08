@@ -6,7 +6,7 @@
 
 1. 改代码。
 2. `Scripts/build.sh` 构建（脚本校验基础配置，不符合就失败）。
-3. `Scripts/release/make_pkg.sh <版本> dist` 在本机打安装包。
+3. `Scripts/release/make_pkg.sh <版本> dist dev` 在本机打安装包，文件名带构建号。
 4. 用 pkg 或 `Scripts/install.sh` 安装，在真实应用里打字、打开设置窗口。
 5. 在真实应用里能用、界面正确，这一轮才算完成。
 

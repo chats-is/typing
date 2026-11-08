@@ -1,14 +1,25 @@
 #!/bin/bash
-# Builds a standard macOS installer package: Scripts/release/make_pkg.sh <version> [out dir]
+# Builds a standard macOS installer package: Scripts/release/make_pkg.sh <version> [out dir] [dev]
 # Installs Typing.app into /Library/Input Methods (all users) and registers it for the account
 # running the installer, so it appears in the input menu right away. Apple silicon, macOS 15 or later.
+# Without "dev", the file is Typing-<version>.pkg. With "dev", it is Typing-<version>-<build>.pkg.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-VERSION="${1:?usage: make_pkg.sh <version> [out dir]}"
+VERSION="${1:?usage: make_pkg.sh <version> [out dir] [dev]}"
 OUT="${2:-dist}"
+DEV="${3:-}"
+if [ -n "$DEV" ] && [ "$DEV" != "dev" ]; then
+    echo "usage: make_pkg.sh <version> [out dir] [dev]" >&2
+    exit 1
+fi
 # Always build: a stale build would ship an older Info.plist (version) or binary.
 Scripts/build.sh
 source Scripts/app_path.sh
+NAME="Typing-$VERSION"
+if [ "$DEV" = "dev" ]; then
+    BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+    NAME="Typing-$VERSION-$BUILD"
+fi
 STAGE="$(mktemp -d)"
 mkdir -p "$STAGE/root/Library/Input Methods" "$STAGE/scripts" "$OUT"
 cp -R "$APP" "$STAGE/root/Library/Input Methods/"
@@ -69,7 +80,7 @@ cat > "$STAGE/distribution.xml" <<DIST
     <pkg-ref id="is.chats.inputmethod.Typing.pkg" version="$VERSION" onConclusion="none">Typing.pkg</pkg-ref>
 </installer-gui-script>
 DIST
-productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE" "$OUT/Typing-$VERSION.pkg" >/dev/null
+productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE" "$OUT/$NAME.pkg" >/dev/null
 rm -rf "$STAGE"
-(cd "$OUT" && shasum -a 256 "Typing-$VERSION.pkg" > "Typing-$VERSION.pkg.sha256")
-ls -la "$OUT/Typing-$VERSION.pkg"
+(cd "$OUT" && shasum -a 256 "$NAME.pkg" > "$NAME.pkg.sha256")
+ls -la "$OUT/$NAME.pkg"

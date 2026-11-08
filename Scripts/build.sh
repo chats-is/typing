@@ -66,6 +66,12 @@ cat Resources/LanguageModel.mlmodelc/weights/weight.bin $(ls Resources/positions
 for f in Resources/weights.json Resources/positions.bin Resources/general_lattices.tsv Resources/general_words.tsv; do [ -f "$f" ] && cp "$f" "$APP/Contents/Resources/"; done
 # What learning records are redacted by (the same rules as the training text); the app stops without it.
 cp Resources/redaction.json "$APP/Contents/Resources/"
+cp Bundle/uninstall.sh "$APP/Contents/Resources/uninstall.sh"
+chmod +x "$APP/Contents/Resources/uninstall.sh"
+# Not sandboxed: the input method cannot change the enabled input-source list. The uninstall
+# script runs this before it deletes the bundle.
+swiftc -O Tools/disable.swift -o "$APP/Contents/MacOS/disable-input-source"
+codesign --force --sign - "$APP/Contents/MacOS/disable-input-source"
 codesign --force --sign - --entitlements Bundle/Typing.entitlements "$APP"
 # Never leave the build copy registered with Launch Services: with two apps for the bundle id the
 # system cannot launch the installed one (LaunchInputMethod -50) and nothing can be typed.

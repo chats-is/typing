@@ -30,7 +30,7 @@ docs/       架构、开发流程、项目规则、基准数字
 
 ```sh
 Scripts/install.sh      # swift build → build/app.noindex/Typing.app → /Library/Input Methods（要一次管理员密码），并登记
-Scripts/uninstall.sh    # 停用、停进程、删除 /Library/Input Methods/Typing.app、清安装收据；加 --data 连学习数据一起删
+Scripts/uninstall.sh    # 开发机上卸掉已安装的输入法：停用、停进程、删除 /Library/Input Methods/Typing.app、清安装收据、删除学习数据
 ```
 
 `Resources/` 里的三个大文件（lexicon.sqlite 112 MB、bigram.bin 91 MB、LanguageModel.mlmodelc 57 MB）用 Git LFS 存放：装了 `git-lfs`（`brew install git-lfs && git lfs install`）再 clone 就能直接构建。没有 LFS 的环境可以用发布包：`Scripts/package_resources.sh` 打包带校验和的归档，`Scripts/fetch_resources.sh <归档>` 解到 `Resources/`。也可以按 `docs/development.md` 用工具链重新生成。`Scripts/build.sh` 在缺文件时会报错指出。
@@ -45,7 +45,7 @@ Scripts/gate.sh         # 装机前的全部门槛：四项词测试、按键测
 
 ## 发布
 
-推一个 `v*` 标签，GitHub Actions 会跑完整门槛并发布 `Typing-<版本>.pkg`（标准安装包）、`.dmg`（拖放安装）和资源归档。细节与签名说明见 `docs/release.md`。
+推一个 `v*` 标签，GitHub Actions 会跑完整门槛并发布 `Typing-<版本>.pkg`、`.dmg` 和资源归档。规则见 `docs/release.md`。
 
 ## 文档
 
@@ -53,7 +53,7 @@ Scripts/gate.sh         # 装机前的全部门槛：四项词测试、按键测
 - `docs/development.md` 从拿到代码开始的完整流程：数据下载、清洗、词库、训练、评测、打包
 - `docs/decisions.md` 项目规则
 - `docs/benchmarks.md` 基准数字与测量方法
-- `docs/release.md` 自动发布、签名、安装
+- `docs/release.md` 版本号、打包、发布、安装、卸载
 
 ## 许可
 

@@ -24,5 +24,9 @@ guard !sources.isEmpty else {
 }
 for source in sources {
     let enableStatus = TISEnableInputSource(source)
-    print(enableStatus == noErr ? "enabled \(bundleID)" : "TISEnableInputSource failed: \(enableStatus)")
+    if enableStatus != noErr {
+        fputs("TISEnableInputSource failed: \(enableStatus)\n", stderr)
+        exit(1)
+    }
+    print("enabled \(bundleID)")
 }

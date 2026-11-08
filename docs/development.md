@@ -31,6 +31,7 @@ Data/venv-train/bin/python Tools/fetch_data.py --update         # 有意换成�
 swift build -c release                 # Engine、Typing、enginecli
 Scripts/build.sh                       # build/app.noindex/Typing.app（签名、复制资源；放在系统不登记应用的目录里，路径只写在 Scripts/app_path.sh）
 Scripts/install.sh                     # 装到 /Library/Input Methods（要一次管理员密码）并重启输入法进程
+Scripts/uninstall.sh                   # 开发机上卸掉已安装的输入法：停用、停进程、删除 App、清安装收据、删除学习数据
 Scripts/gate.sh [私有回放文件]          # 装机门槛：全部测试，最后自动判定 GATE PASSED / GATE FAILED
 Scripts/symtest.sh                     # 只跑按键测试
 ```
