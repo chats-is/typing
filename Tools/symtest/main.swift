@@ -9,7 +9,15 @@ enum EngineHost {
     /// The real lexicon without the model (deterministic), so candidate paging can be tested.
     static let lexiconDecoder: LexiconDecoder? = {
         guard let lexicon = try? Lexicon(path: "Resources/lexicon.sqlite") else { return nil }
-        return LexiconDecoder(lexicon: lexicon, scorer: nil, bigram: try? BigramModel(path: "Resources/bigram.bin"))
+        let decoder = LexiconDecoder(lexicon: lexicon, scorer: nil, bigram: try? BigramModel(path: "Resources/bigram.bin"))
+        decoder.typedEnglish = { Learning.enabled ? Learning.store.typedEnglish($0) : [] }
+        decoder.userWordsEnabled = { Learning.enabled }
+        Learning.store.onWordChanged = { text, keys in
+            if let text { decoder.replaceUserWord(text: text, keys: keys) }
+            else { decoder.clearUserWords() }
+        }
+        decoder.installUserWords(Learning.store.entries())
+        return decoder
     }()
     static let decoder: CandidateDecoding? = lexiconDecoder.map(LaterLookDecoder.init)
 }
@@ -508,10 +516,40 @@ for text in ["群里@所有人今天下午三点开会请大家准时到场不�
     let once = Redaction.redact(text), twice = Redaction.redact(once)
     print((once == twice ? "ok   " : "FAIL ") + "redaction twice = once: \(once)"); if once != twice { failures += 1 }
 }
+let beforeSingle = EngineHost.decoder?.decode("d", precedingText: "").refined().candidates.map(\.text) ?? []
+Learning.store.record(keys: "d", text: "的", context: "", undoWindow: 0)
+Learning.store.flush()
+let afterSingle = EngineHost.decoder?.decode("d", precedingText: "").refined().candidates.map(\.text) ?? []
+let singleKept = beforeSingle == afterSingle
+print((singleKept ? "ok   " : "FAIL ") + "a single character stays out of the user words"); if !singleKept { failures += 1 }
+Learning.store.record(keys: "gjh", text: "构建号", context: "", undoWindow: 0)
+Learning.store.record(keys: "goujh", text: "构建号", context: "", undoWindow: 0)
+Learning.store.record(keys: "goujianhao", text: "构建号", context: "", undoWindow: 0)
+Learning.store.flush()
+func offersBuilt(_ input: String) -> Bool {
+    EngineHost.decoder?.decode(input, precedingText: "").refined().candidates.contains { $0.text == "构建号" } == true
+}
+let offered = offersBuilt("gjh") && offersBuilt("goujh") && offersBuilt("goujianhao")
+print((offered ? "ok   " : "FAIL ") + "构建号 is offered for gjh, goujh and goujianhao"); if !offered { failures += 1 }
+let sentence = "我们今天一起去公司吃饭"
+Learning.store.record(keys: "womenjintianyijiqvgongsichifan", text: sentence, context: "", undoWindow: 0)
+Learning.store.flush()
+let sentenceOut = EngineHost.decoder?.decode("womenjintianyijiqvgongsichifan", precedingText: "").refined().candidates.contains { $0.text == sentence } != true
+print((sentenceOut ? "ok   " : "FAIL ") + "a sentence longer than eight characters is not a user word"); if !sentenceOut { failures += 1 }
+UserDefaults.standard.set(false, forKey: "LearningEnabled")
+let hiddenWhileOff = !offersBuilt("gjh") && !offersBuilt("goujianhao")
+UserDefaults.standard.set(true, forKey: "LearningEnabled")
+let shownAgain = offersBuilt("gjh")
+print((hiddenWhileOff && shownAgain ? "ok   " : "FAIL ") + "user words are merged only while learning is on"); if !(hiddenWhileOff && shownAgain) { failures += 1 }
+Learning.store.removeEntries(keys: "gjh", text: "构建号")
+Learning.store.removeEntries(keys: "goujh", text: "构建号")
+Learning.store.removeEntries(keys: "goujianhao", text: "构建号")
+let removed = !offersBuilt("gjh") && !offersBuilt("goujianhao")
+print((removed ? "ok   " : "FAIL ") + "构建号 leaves the candidates when its records are deleted"); if !removed { failures += 1 }
 let afterPrompt = Learning.store.entries().contains { $0.text == "一起" }
 print((!afterPrompt ? "ok   " : "FAIL ") + "learning record: nothing kept after a prompt for a code"); if afterPrompt { failures += 1 }
-let offered = Learning.store.typedEnglish("dont") == ["don't"]
-print((offered ? "ok   " : "FAIL ") + "a recorded English word is offered for its letters (dont → don't)"); if !offered { failures += 1 }
+let englishOffered = Learning.store.typedEnglish("dont") == ["don't"]
+print((englishOffered ? "ok   " : "FAIL ") + "a recorded English word is offered for its letters (dont → don't)"); if !englishOffered { failures += 1 }
 key("", code: ESC); client.text = NSMutableString(); client.cursor = 0; client.marked = nil
 
 // A terminal password prompt stays on the line (echo is off). Keys are typed as they are.

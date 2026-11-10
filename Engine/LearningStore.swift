@@ -110,6 +110,8 @@ public final class LearningStore {
         // A file written before inputs were counted once: the session bookkeeping counted lines.
         var state = state()
         if state.entriesAtLastSession > count { state.entriesAtLastSession = count; save(state) }
+        spellings = Self.keysByText(entriesLocked())
+        wordsLive = true
     }
 
     /// Records a commit. It is held back for `undoWindow` seconds first: text deleted again right
@@ -120,7 +122,7 @@ public final class LearningStore {
         guard !Redaction.asksForSecret(context), !Redaction.atSecretPrompt(context) else { return }
         let text = Redaction.redact(text), context = String(Redaction.redact(context).suffix(60))
         guard Self.isRecordable(text) else { return }
-        lock.lock(); defer { lock.unlock() }
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
         flushPendingLocked()
         pending = Entry(time: Date().timeIntervalSince1970, keys: keys, text: text, context: context)
         pendingDeadline = Date(timeIntervalSinceNow: undoWindow)
@@ -130,7 +132,7 @@ public final class LearningStore {
     /// `characters` characters were deleted right after a commit: drop the held-back entry
     /// when most of it is gone.
     public func deleted(characters: Int) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
         guard let entry = pending, Date() < pendingDeadline else { flushPendingLocked(); return }
         pendingDeleted += characters
         if pendingDeleted * 2 >= entry.text.count { pending = nil }
@@ -138,30 +140,36 @@ public final class LearningStore {
 
     /// Writes a held-back entry whose undo window has passed.
     public func flush() {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
         if Date() >= pendingDeadline { flushPendingLocked() }
     }
 
     private func flushPendingLocked() {
         guard let entry = pending else { return }
         pending = nil
-        guard let data = try? JSONEncoder().encode(entry), var line = String(data: data, encoding: .utf8) else { return }
+        _ = appendLocked(entry)
+    }
+
+    /// Appends one line. The caller holds `lock`. A repeat is another line; reading folds it in.
+    private func appendLocked(_ entry: Entry) -> Bool {
+        guard let data = try? JSONEncoder().encode(entry), var line = String(data: data, encoding: .utf8) else { return false }
         line += "\n"
         if handle == nil {
             if !FileManager.default.fileExists(atPath: entriesURL.path) { FileManager.default.createFile(atPath: entriesURL.path, contents: nil) }
             handle = try? FileHandle(forWritingTo: entriesURL)
             _ = try? handle?.seekToEnd()
         }
-        if let data = line.data(using: .utf8), (try? handle?.write(contentsOf: data)) != nil {
-            rawLines += 1
-            if identities.insert(entry.identity).inserted { count += 1 }
-            learnedCache = nil
-            if count > Self.maxEntries {
-                rewriteLocked(Self.pruned(entriesLocked()))
-            } else if rawLines - count > Self.compactAfterRepeats {
-                rewriteLocked(entriesLocked())
-            }
+        guard let data = line.data(using: .utf8), (try? handle?.write(contentsOf: data)) != nil else { return false }
+        rawLines += 1
+        if identities.insert(entry.identity).inserted { count += 1 }
+        remember(entry)
+        invalidate()
+        if count > Self.maxEntries {
+            rewriteLocked(Self.pruned(entriesLocked()))
+        } else if rawLines - count > Self.compactAfterRepeats {
+            rewriteLocked(entriesLocked())
         }
+        return true
     }
 
     /// Every entry with its text and contexts redacted; entries left with nothing worth recording
@@ -228,7 +236,26 @@ public final class LearningStore {
         rawLines = entries.count
         count = entries.count
         identities = Set(entries.map(\.identity))
+        replaceSpellings(entries)
+        invalidate()
+    }
+
+    /// The records a decode merges into the lexicon. Pending input still inside the undo window is omitted.
+    public func snapshot() -> (generation: Int, entries: [Entry]) {
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
+        flushPendingLockedIfDue()
+        if entryCacheGeneration == generation, let entryCache { return (generation, entryCache) }
+        let list = entriesLocked()
+        entryCache = list
+        entryCacheGeneration = generation
+        return (generation, list)
+    }
+
+    private func invalidate() {
+        generation &+= 1
         learnedCache = nil
+        entryCache = nil
+        entryCacheGeneration = -1
     }
 
     private func flushPendingLockedIfDue() { if Date() >= pendingDeadline { flushPendingLocked() } }
@@ -243,7 +270,7 @@ public final class LearningStore {
 
     /// Forgets everything learned: the entries and the tuned tensors.
     public func reset() {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
         pending = nil
         handle = nil
         for name in ["entries.jsonl", "tuned.json", "tuned.bin", "tuned.model", "tuned.new.json", "tuned.new.bin", "state.json", "exclusions.json"] {
@@ -253,6 +280,9 @@ public final class LearningStore {
         rawLines = 0
         identities = []
         heldKeysCache = []
+        spellings = [:]
+        queueWord(nil)
+        invalidate()
     }
 
     public var hasTunedWeights: Bool { FileManager.default.fileExists(atPath: tunedBase + ".json") }
@@ -304,14 +334,14 @@ public final class LearningStore {
 
     /// Deletes recorded entries (by time stamp), so the next session learns without them.
     public func removeEntries(times: Set<Double>) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
         flushPendingLocked()
         rewriteLocked(entriesLocked().filter { !times.contains($0.time) })
     }
 
     /// Deletes every record of `keys` producing `text`.
     public func removeEntries(keys: String, text: String) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock(); defer { lock.unlock(); deliverWordNotices() }
         flushPendingLocked()
         rewriteLocked(entriesLocked().filter { !($0.keys == keys && $0.text == text) })
     }
@@ -321,6 +351,67 @@ public final class LearningStore {
     private var learnedCache: Set<String>?
     private var englishCache: [String: [String]] = [:]
     private var learnedCacheCount = -1
+    /// Bumps whenever the entry file changes, so the in-memory user words can be rebuilt.
+    public private(set) var generation = 0
+    private var entryCache: [Entry]?
+    private var entryCacheGeneration = -1
+    /// Pinyin already stored for each text. A new record updates one word, not the whole list.
+    private var spellings: [String: [String]] = [:]
+    private var wordsLive = false
+    private var wordNotices: [(String?, [String])] = []
+    private var deliveringWordNotices = false
+    /// `text == nil` means every user word was cleared. Called without the store lock.
+    public var onWordChanged: ((String?, [String]) -> Void)?
+
+    private static func letters(_ keys: String) -> String {
+        keys.lowercased().filter { $0.isASCII && $0.isLetter }
+    }
+
+    private static func keysByText(_ entries: [Entry]) -> [String: [String]] {
+        var map: [String: [String]] = [:]
+        for entry in entries {
+            let keys = letters(entry.keys)
+            guard !keys.isEmpty else { continue }
+            if map[entry.text]?.contains(keys) != true { map[entry.text, default: []].append(keys) }
+        }
+        return map
+    }
+
+    private func remember(_ entry: Entry) {
+        let keys = Self.letters(entry.keys)
+        guard !keys.isEmpty else { return }
+        var list = spellings[entry.text] ?? []
+        guard !list.contains(keys) else { return }
+        list.append(keys)
+        spellings[entry.text] = list
+        queueWord(entry.text)
+    }
+
+    private func replaceSpellings(_ entries: [Entry]) {
+        let next = Self.keysByText(entries)
+        var changed = Set(spellings.keys).symmetricDifference(next.keys)
+        for (text, keys) in next where spellings[text] != keys { changed.insert(text) }
+        spellings = next
+        for text in changed { queueWord(text) }
+    }
+
+    private func queueWord(_ text: String?) {
+        guard wordsLive else { return }
+        wordNotices.append((text, text.flatMap { spellings[$0] } ?? []))
+    }
+
+    /// Runs after the store lock is released. One notice is one word.
+    private func deliverWordNotices() {
+        guard !deliveringWordNotices else { return }
+        deliveringWordNotices = true
+        defer { deliveringWordNotices = false }
+        while !wordNotices.isEmpty {
+            let notes = wordNotices
+            wordNotices.removeAll()
+            let callback = onWordChanged
+            for note in notes { callback?(note.0, note.1) }
+        }
+    }
     public static let learnedMaxLength = 4
 
     /// What is worth recording: text with Chinese in it, or an English word.

@@ -27,6 +27,13 @@ enum EngineHost {
                 decoder.heldKeys = Learning.heldKeysFilter()
                 // English words in the learning records are offered even when the table lacks them.
                 decoder.typedEnglish = { Learning.enabled ? Learning.store.typedEnglish($0) : [] }
+                decoder.userWordsEnabled = { Learning.enabled }
+                // The lexicon is open: merge the records once. Later writes update one word.
+                Learning.store.onWordChanged = { text, keys in
+                    if let text { decoder.replaceUserWord(text: text, keys: keys) }
+                    else { decoder.clearUserWords() }
+                }
+                decoder.installUserWords(Learning.store.entries())
                 // Characters no font on this Mac has are not offered (they would show as a box).
                 decoder.canShow = CandidatePanel.canShow
                 decoder.setFuzzyRules(FuzzySettings.rules)

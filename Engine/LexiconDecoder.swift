@@ -51,12 +51,37 @@ public final class LexiconDecoder: CandidateDecoding {
     /// readings even when the English table lacks them (at the table's rarest frequency; learning
     /// decides how far they rise).
     public var typedEnglish: ((String) -> [String])?
+    /// Learning off: the in-memory user words stay, but candidates do not use them.
+    public var userWordsEnabled: (() -> Bool)?
+    private var userLexicon = UserLexicon()
+    /// Set for the decode in progress. The decoder lock keeps it to this call.
+    private var useUserWords = false
     /// Whether this Mac can draw a text (fonts differ between macOS versions): characters from CJK
     /// extension B on that no font has are not offered, as they would show as a box. nil: no check.
     public var canShow: ((String) -> Bool)?
     /// Keys (letters only) whose learned order was deleted: typed alone they keep the
     /// general order until the next kept learning session.
     public var heldKeys: ((String) -> Bool)?
+
+    /// Loads every recorded word once, when the lexicon is opened.
+    public func installUserWords(_ entries: [LearningStore.Entry]) {
+        lock.lock(); defer { lock.unlock() }
+        userLexicon.rebuild(entries: entries, lexicon: lexicon)
+        runCaches.removeAll()
+    }
+
+    /// One learning record changed: keep that word alone up to date.
+    public func replaceUserWord(text: String, keys: [String]) {
+        lock.lock(); defer { lock.unlock() }
+        userLexicon.replace(text: text, keys: keys, lexicon: lexicon)
+        runCaches.removeAll()
+    }
+
+    public func clearUserWords() {
+        lock.lock(); defer { lock.unlock() }
+        userLexicon.rebuild(entries: [], lexicon: lexicon)
+        runCaches.removeAll()
+    }
     /// Word-pair statistics over everyday text (Tools/build_bigram.py), so the lattice search
     /// itself prefers words that go together; nil falls back to word frequencies alone.
     private let bigram: BigramModel?
@@ -230,6 +255,7 @@ public final class LexiconDecoder: CandidateDecoding {
         let chars = Array(input.utf8)
         guard !chars.isEmpty else { return .empty }
         decodeCount += 1
+        useUserWords = userWordsEnabled?() ?? false
         // v and a number, a sum or a code point: the result, not pinyin (QuickInput).
         if QuickInput.isQuick(input) {
             let results = QuickInput.candidates(for: input).filter { showable($0) }
@@ -538,14 +564,14 @@ public final class LexiconDecoder: CandidateDecoding {
                 if isCorrection && corrected { continue }
                 let syllables = step.syllables.joined(separator: "'")
                 let newKey = key.isEmpty ? syllables : key + "'" + syllables
-                guard lexicon.hasPrefix(newKey) else { continue }
+                guard lexicon.hasPrefix(newKey) || (useUserWords && userLexicon.hasPrefix(newKey)) else { continue }
                 let end = skipSeparators(step.end)
                 let newCuts = cuts + step.cuts
                 let newPenalty = penalty + step.penalty
 
                 var known = Set<String>()
-                for entry in timedLexicon({ lexicon.exact(newKey) }) {
-                    known.insert(entry.word)
+                for entry in timedLexicon({ lexicon.exact(newKey) }) + (useUserWords ? userLexicon.exact(newKey) : []) {
+                    guard known.insert(entry.word).inserted else { continue }
                     edges.append(Edge(start: start, end: end, word: word(entry, key: newKey), logp: entry.logp,
                                       penalty: newPenalty, cuts: newCuts, partial: false, english: false))
                 }
@@ -562,7 +588,8 @@ public final class LexiconDecoder: CandidateDecoding {
                 let tail = slice(position, n)
                 if lexicon.syllablePrefixes.contains(tail) {
                     let keyPrefix = key.isEmpty ? tail : key + "'" + tail
-                    for entry in timedLexicon({ lexicon.partial(syllableCount: depth + 1, keyPrefix: keyPrefix) }) where !exactAtEnd.contains(entry.word) {
+                    var partialSeen = exactAtEnd
+                    for entry in timedLexicon({ lexicon.partial(syllableCount: depth + 1, keyPrefix: keyPrefix) }) + (useUserWords ? userLexicon.partial(syllableCount: depth + 1, keyPrefix: keyPrefix) : []) where partialSeen.insert(entry.word).inserted {
                         reachable[n] = true
                         edges.append(Edge(start: start, end: n, word: word(entry, key: entry.key), logp: entry.logp,
                                           penalty: penalty + partialPenalty, cuts: cuts + [n], partial: true, english: false))
@@ -583,11 +610,14 @@ public final class LexiconDecoder: CandidateDecoding {
                 let newCuts = cuts + [j]
                 let newInitials = initials + (complete ? 0 : 1)
                 if newInitials == 0 {
-                    guard lexicon.hasPrefix(newSegments.map(\.text).joined(separator: "'")) else { return }
+                    let full = newSegments.map(\.text).joined(separator: "'")
+                    guard lexicon.hasPrefix(full) || (useUserWords && userLexicon.hasPrefix(full)) else { return }
                 } else if newSegments.count > 1 {
                     // Words with some syllables cut to their initial. A single character is not read by
-                    // its initial alone: that lowers the word tests.
-                    for entry in timedLexicon({ lexicon.abbreviated(newSegments) }) {
+                    // its initial alone: that lowers the word tests. User words are added past the
+                    // shipped abbreviation limit.
+                    var abbreviatedSeen = Set<String>()
+                    for entry in timedLexicon({ lexicon.abbreviated(newSegments) }) + (useUserWords ? userLexicon.abbreviated(newSegments) : []) where abbreviatedSeen.insert(entry.word).inserted {
                         reachable[end] = true
                         edges.append(Edge(start: start, end: end, word: word(entry, key: entry.key), logp: entry.logp,
                                           penalty: Double(newInitials) * initialPenalty, cuts: newCuts, partial: true, english: false))
